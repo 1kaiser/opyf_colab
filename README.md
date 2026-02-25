@@ -16,20 +16,22 @@ Integrated tools for designing irrigation canals following **Indian Standard (IS
 Advanced fluid flow analysis using the `opyflow` library, enabling high-resolution velocity vector mapping from video data.
 - **Brague Flood Case Study:** Integrated demonstration of Large-Scale Particle Image Velocimetry (LSPIV) on real-world flood data.
 
-### 3. 👁️ JAX Vision Models
-Integrated SOTA computer vision models ported to JAX/Flax for enhanced flow analysis:
-- **[NEW] 3D Surface Reconstruction:** A unified notebook for creating metric 3D models of water surfaces and canal geometry.
-- **LightGlue JAX:** Used for **high-precision stabilization** of amateur videos by tracking static background features.
-- **Depth Pro JAX:** Metric depth estimation for **3D water surface reconstruction** and orthorectification.
+### 4. 🌐 Client-Side Optimization (JAX-JS)
+High-performance engineering logic running directly in the browser via WebGPU/Wasm.
+- **Differentiable Linear Solvers:** Native implementation of Conjugate Gradient (CG) solvers in JavaScript.
+- **Interactive Design:** Real-time canal dimension optimization for web-based 3D viewers.
+- **Portability:** Move your JAX physics models from the cloud directly to the client's browser.
 
 ## 📁 Repository Structure
 
 ```text
 .
-├── canal_design/       # IS-Compliant Canal Design & Optimization
+├── canal_design/       # IS-Compliant Canal Design (Python/JAX)
 ├── tests/
 │   └── Test_Brague_flood/  # LSPIV Brague River Case Study
-├── jax_3d_canal_reconstruction.ipynb # 3D Vision Pipeline (Depth Pro + LG)
+├── web/
+│   └── jax-js-fem/     # Browser-based JAX-JS FEM & Optimization
+├── jax_3d_canal_reconstruction.ipynb # 3D Vision Pipeline
 ├── opyf_Eumetsat_velocimetry.ipynb # Core velocimetry notebook
 └── README.md
 ```
