@@ -18,6 +18,7 @@ Advanced fluid flow analysis using the `opyflow` library, enabling high-resoluti
 
 ### 3. 👁️ JAX Vision Models
 Integrated SOTA computer vision models ported to JAX/Flax for enhanced flow analysis:
+- **[NEW] 3D Surface Reconstruction:** A unified notebook for creating metric 3D models of water surfaces and canal geometry.
 - **LightGlue JAX:** Used for **high-precision stabilization** of amateur videos by tracking static background features.
 - **Depth Pro JAX:** Metric depth estimation for **3D water surface reconstruction** and orthorectification.
 
@@ -26,12 +27,9 @@ Integrated SOTA computer vision models ported to JAX/Flax for enhanced flow anal
 ```text
 .
 ├── canal_design/       # IS-Compliant Canal Design & Optimization
-│   ├── design_canal_is_v2.py  # Unified 3D/2D generator
-│   └── jax_canal_optimizer.py # Differentiable design engine
 ├── tests/
 │   └── Test_Brague_flood/  # LSPIV Brague River Case Study
-│       ├── Brague_Flood_LSPIV.ipynb # Interactive demo
-│       └── ...
+├── jax_3d_canal_reconstruction.ipynb # 3D Vision Pipeline (Depth Pro + LG)
 ├── opyf_Eumetsat_velocimetry.ipynb # Core velocimetry notebook
 └── README.md
 ```
