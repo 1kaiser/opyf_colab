@@ -12,13 +12,14 @@ Integrated tools for designing irrigation canals following **Indian Standard (IS
 - **IS Compliance:** Automatic validation against **IS 5968** (Layout) and **IS 10430** (Lined Canals).
 - **CAD Automation:** Scripts to generate 3D models (STEP/GLB) and 2D engineering drawings.
 
-### 2. 🌊 PIV & Velocimetry (Opyflow)
+### 2. 🌊 LSPIV & Velocimetry (Opyflow)
 Advanced fluid flow analysis using the `opyflow` library, enabling high-resolution velocity vector mapping from video data.
+- **Brague Flood Case Study:** Integrated demonstration of Large-Scale Particle Image Velocimetry (LSPIV) on real-world flood data.
 
 ### 3. 👁️ JAX Vision Models
 Integrated SOTA computer vision models ported to JAX/Flax for enhanced flow analysis:
-- **Depth Pro JAX:** Metric depth estimation for 3D water surface reconstruction.
-- **LightGlue & SuperPoint:** High-speed feature matching for tracking particles or surface markers across frames.
+- **LightGlue JAX:** Used for **high-precision stabilization** of amateur videos by tracking static background features.
+- **Depth Pro JAX:** Metric depth estimation for **3D water surface reconstruction** and orthorectification.
 
 ## 📁 Repository Structure
 
@@ -27,6 +28,10 @@ Integrated SOTA computer vision models ported to JAX/Flax for enhanced flow anal
 ├── canal_design/       # IS-Compliant Canal Design & Optimization
 │   ├── design_canal_is_v2.py  # Unified 3D/2D generator
 │   └── jax_canal_optimizer.py # Differentiable design engine
+├── tests/
+│   └── Test_Brague_flood/  # LSPIV Brague River Case Study
+│       ├── Brague_Flood_LSPIV.ipynb # Interactive demo
+│       └── ...
 ├── opyf_Eumetsat_velocimetry.ipynb # Core velocimetry notebook
 └── README.md
 ```
