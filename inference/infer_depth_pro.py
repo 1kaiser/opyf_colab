@@ -22,7 +22,7 @@ def infer_depth_pro(image_path, weights_path, output_path):
     with open(weights_path, "rb") as f:
         variables = serialization.from_bytes(None, f.read())
         
-    img = cv2.imread(image_path)
+    print(f"Loading image from: {os.path.abspath(image_path)}")\n    img = cv2.imread(image_path)\n    if img is None:\n        raise FileNotFoundError(f"Error: Could not read image at {os.path.abspath(image_path)}. Check if the file exists.")
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     
     input_size = 1536

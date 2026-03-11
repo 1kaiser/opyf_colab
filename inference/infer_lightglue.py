@@ -23,7 +23,7 @@ def infer_lightglue(image1_path, image2_path, sp_weights, lg_weights, output_pat
         lg_vars = serialization.from_bytes(None, f.read())
         
     def load_img(path):
-        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        print(f"Loading image from: {os.path.abspath(path)}")\n        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)\n        if img is None:\n            raise FileNotFoundError(f"Error: Could not read image at {os.path.abspath(path)}. Check if the file exists.")
         h, w = img.shape
         nh, nw = (h // 8) * 8, (w // 8) * 8
         img = cv2.resize(img, (nw, nh))
