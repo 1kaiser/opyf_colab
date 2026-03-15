@@ -36,19 +36,21 @@ opyf_colab/
 │   └── jax/                # 🧠 JAX Vision Model Implementations
 │       ├── jax_depth_pro/
 │       ├── jax_lightglue/
+│       ├── jax_mast3r/      # 🪐 JAX Mast3r Implementation
 │       ├── jax_reconstruction/
 │       └── jax_vggt/
 ├── pipelines/              # 🏗️ Modular Reconstruction Pipelines
-│   ├── pipeline_jax.py     # Zonal Reconstruction (Depth Pro + LG)
-│   └── pipeline_vggt3_jax.py
+│   └── pipeline_jax.py     # Zonal Reconstruction (Depth Pro + LG)
 ├── inference/              # 🧪 Standalone Inference Scripts
 ├── canal_design/           # 📐 IS-Compliant Canal Design (JAX)
 ├── web/
 │   └── jax-js-fem/         # 🌐 Browser-based JAX-JS Optimization
 ├── tests/
 │   └── Test_Brague_flood/  # 🌊 LSPIV Brague River Case Study
+├── jax_3d_canal_reconstruction.ipynb # 🚜 JAX Canal CAD Pipeline
 ├── jax_3d_reconstruction_colab.ipynb  # 🚀 Core 3D Vision Notebook
 ├── opyf_Eumetsat_velocimetry.ipynb    # 🌊 Core Velocimetry Notebook
+├── LICENSE                 # ⚖️ Apache 2.0 License
 └── README.md
 ```
 

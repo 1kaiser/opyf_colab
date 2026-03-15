@@ -1,0 +1,13 @@
+{
+    "is_discharge_target": 50.0,
+    "bed_width": 49.571142832842106,
+    "water_depth": 1.5508283576484974,
+    "side_slope": 1.9533020966329397,
+    "freeboard": 0.6,
+    "total_depth": 2.1508283576484972,
+    "calculated_discharge": 81.98984361182589,
+    "velocity": 1.0050957810529564,
+    "min_radius": 1500.0,
+    "manning_n": 0.018,
+    "long_slope": 0.0002
+}

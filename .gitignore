@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Data & Outputs
+output/
+weights/
+*.npy
+*.zip
+*.MOV
+*.mp4
+*.glb
+*.ply
+
+# Environment
+.venv/
+env/
+venv/
+ENV/
