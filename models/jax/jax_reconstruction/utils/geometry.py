@@ -67,6 +67,37 @@ def kabsch_alignment(P: jnp.ndarray, Q: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.n
     
     return R, t
 
+def umeyama_alignment(P: jnp.ndarray, Q: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, float]:
+    """Computes similarity transform (s, R, t) such that Q = s*R*P + t
+    P, Q: [N, 3]
+    """
+    n, m = P.shape
+    centroid_P = jnp.mean(P, axis=0)
+    centroid_Q = jnp.mean(Q, axis=0)
+    P_centered = P - centroid_P
+    Q_centered = Q - centroid_Q
+    
+    # Variance of P
+    var_P = jnp.mean(jnp.sum(P_centered**2, axis=1))
+    
+    # Covariance
+    H = P_centered.T @ Q_centered / n
+    U, S, Vt = jnp.linalg.svd(H)
+    
+    # Correct reflection
+    d = jnp.linalg.det(U) * jnp.linalg.det(Vt.T)
+    S_adj = jnp.eye(m).at[m-1, m-1].set(jnp.where(d < 0, -1.0, 1.0))
+    
+    R = Vt.T @ S_adj @ U.T
+    
+    # Scale
+    s = (1.0 / var_P) * jnp.trace(jnp.diag(S) @ S_adj)
+    
+    # Translation
+    t = centroid_Q - s * (R @ centroid_P)
+    
+    return R, t, s
+
 def apply_transform(P: jnp.ndarray, R: jnp.ndarray, t: jnp.ndarray) -> jnp.ndarray:
     """P: [N, 3], R: [3, 3], t: [3]"""
     return (R @ P.T).T + t

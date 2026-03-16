@@ -54,6 +54,23 @@ opyf_colab/
 └── README.md
 ```
 
+## 🏗️ Dependency Architecture (Core Pipeline)
+
+The `jax_3d_reconstruction_colab.ipynb` notebook orchestrates a modular JAX-based vision stack:
+
+```text
+jax_3d_reconstruction_colab.ipynb
+├── ReconstructionPipeline (pipelines/pipeline_jax.py)
+│   ├── Depth Pro (models/jax/jax_depth_pro) ➔ Metric Depth
+│   ├── SuperPoint (models/jax/jax_lightglue) ➔ Feature Extraction
+│   ├── LightGlue (models/jax/jax_lightglue) ➔ Feature Matching
+│   └── Geometry Utils (models/jax/jax_reconstruction) ➔ Kabsch Alignment
+└── Weights (.msgpack)
+    ├── depth_pro.msgpack (1.8 GB)
+    ├── superpoint.msgpack (5 MB)
+    └── superpoint_lightglue.msgpack (46 MB)
+```
+
 ## 📊 Visual Results
 
 ### 3D Metric Reconstruction

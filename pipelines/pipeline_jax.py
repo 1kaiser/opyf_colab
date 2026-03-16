@@ -12,7 +12,7 @@ import open3d as o3d
 from models.jax.jax_depth_pro.models.depth_pro import DepthPro
 from models.jax.jax_lightglue.models.superpoint import SuperPoint
 from models.jax.jax_lightglue.models.lightglue import LightGlue
-from models.jax.jax_reconstruction.utils.geometry import lift_points, kabsch_alignment, apply_transform
+from models.jax.jax_reconstruction.utils.geometry import lift_points, kabsch_alignment, umeyama_alignment, apply_transform
 
 jax.config.update("jax_default_matmul_precision", "default")
 
@@ -85,7 +85,7 @@ class ReconstructionPipeline:
             zones.append((z_kpts, desc[iy, ix, :], (r_start, r_end)))
         return zones
 
-    def run(self, image_folder, output_path="output/reconstruction", max_kpts=3072, num_zones=3, radial_clip=0.70):
+    def run(self, image_folder, output_path="output/reconstruction", max_kpts=3072, num_zones=3, radial_clip=0.70, alignment_mode="rigid"):
         os.makedirs(output_path, exist_ok=True)
         img_files = sorted([f for f in os.listdir(image_folder) if f.lower().endswith('.jpg') or f.lower().endswith('.png')])
         img_files = img_files[:10]
@@ -99,7 +99,7 @@ class ReconstructionPipeline:
             curr_data = self.process_image(os.path.join(image_folder, img_name))
             curr_data['zones'] = self.get_concentric_zones(curr_data['sp_scores'], curr_data['sp_desc'], num_zones=num_zones, k=max_kpts)
             current_frame_poses = []
-            print(f"\nFrame {i} Zonal Registration:")
+            print(f"\nFrame {i} Zonal Registration ({alignment_mode}):")
             for z_idx in range(num_zones):
                 kpts0, desc0, _ = prev_data['zones'][z_idx]
                 kpts1, desc1, _ = curr_data['zones'][z_idx]
@@ -116,9 +116,19 @@ class ReconstructionPipeline:
                 if len(idx0) > 8:
                     p0_3d = lift_points(kpts0[idx0], prev_data['inv_depth'], prev_data['fov'])
                     p1_3d = lift_points(kpts1[idx1], curr_data['inv_depth'], curr_data['fov'])
-                    R, t = kabsch_alignment(p0_3d, p1_3d)
-                    T_z_glob = T_globals[img_files[i-1]][z_idx] @ jnp.linalg.inv(jnp.eye(4).at[:3, :3].set(R).at[:3, 3].set(t))
-                    rmse = jnp.sqrt(jnp.mean(jnp.sum((apply_transform(p0_3d, R, t) - p1_3d)**2, axis=1)))
+                    
+                    if alignment_mode == "similarity":
+                        R, t, s = umeyama_alignment(p0_3d, p1_3d)
+                        T_rel = jnp.eye(4).at[:3, :3].set(s * R).at[:3, 3].set(t)
+                        p0_aligned = s * (R @ p0_3d.T).T + t
+                        print(f"  Zone {z_idx}: Scale factor = {s:.4f}")
+                    else:
+                        R, t = kabsch_alignment(p0_3d, p1_3d)
+                        T_rel = jnp.eye(4).at[:3, :3].set(R).at[:3, 3].set(t)
+                        p0_aligned = (R @ p0_3d.T).T + t
+                        
+                    T_z_glob = T_globals[img_files[i-1]][z_idx] @ jnp.linalg.inv(T_rel)
+                    rmse = jnp.sqrt(jnp.mean(jnp.sum((p0_aligned - p1_3d)**2, axis=1)))
                     print(f"  Zone {z_idx}: RMSE={rmse:.6f}, Matches={len(idx0)}")
                 else:
                     T_z_glob = T_globals[img_files[i-1]][z_idx]
