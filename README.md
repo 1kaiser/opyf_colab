@@ -64,12 +64,17 @@ jax_3d_reconstruction_colab.ipynb
 │   ├── Depth Pro (models/jax/jax_depth_pro) ➔ Metric Depth
 │   ├── SuperPoint (models/jax/jax_lightglue) ➔ Feature Extraction
 │   ├── LightGlue (models/jax/jax_lightglue) ➔ Feature Matching
-│   └── Geometry Utils (models/jax/jax_reconstruction) ➔ Kabsch Alignment
+│   └── Geometry Utils (models/jax/jax_reconstruction) ➔ Umeyama Alignment
 └── Weights (.msgpack)
     ├── depth_pro.msgpack (1.8 GB)
     ├── superpoint.msgpack (5 MB)
     └── superpoint_lightglue.msgpack (46 MB)
 ```
+
+### 🔄 Alignment Modes: Rigid vs. Similarity
+We have integrated two core alignment algorithms in `geometry.py`:
+- **Rigid (Kabsch):** Best for absolute metric consistency. Solves for Rotation + Translation.
+- **Similarity (Umeyama):** **[Recommended]** Solves for Rotation + Translation + **Scale**. This is crucial for stitching multiple "zones" where slight depth-scale variations might exist between frames, significantly reducing RMSE in complex reconstructions.
 
 ## 📊 Visual Results
 
