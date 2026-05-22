@@ -88,7 +88,7 @@ if __name__ == "__main__":
     # If run via freecadcmd, it won't have sys.argv[1] correctly usually
     # So we look for a fixed file name
     json_input = "canal_params.json"
-    output_obj = "/home/kaiser/gemini_project2/is_canal_optimized.obj"
+    output_obj = "output/is_canal_optimized.obj"
     
     if os.path.exists(json_input):
         generate_cad_from_json(json_input, output_obj)

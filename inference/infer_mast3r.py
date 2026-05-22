@@ -59,7 +59,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MAST3R JAX Inference")
     parser.add_argument("--img1", type=str, required=True, help="Path to image 1")
     parser.add_argument("--img2", type=str, required=True, help="Path to image 2")
-    parser.add_argument("--weights", type=str, default="/home/kaiser/gemini_project2/weights/mast3r_full.msgpack", help="Path to weights")
+    parser.add_argument("--weights", type=str, default="weights/mast3r_full.msgpack", help="Path to weights")
     parser.add_argument("--output", type=str, default="output/mast3r_results", help="Output directory")
     args = parser.parse_args()
     

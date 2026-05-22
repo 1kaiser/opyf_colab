@@ -6,7 +6,6 @@ import json
 # Set up FreeCAD and JAX environment paths
 sys.path.append("/usr/lib/freecad/lib")
 sys.path.append("/usr/share/freecad/Mod")
-sys.path.append("/home/kaiser/.miniforge/envs/num_python/lib/python3.12/site-packages")
 
 # Now import modules that depend on these paths
 import FreeCAD
@@ -98,7 +97,7 @@ ALIGNMENT = [
 ]
 
 designer = OptimizedISCanalDesigner(solution)
-designer.generate_3d_model(ALIGNMENT, "/home/kaiser/gemini_project2/is_canal_optimized.obj")
+designer.generate_3d_model(ALIGNMENT, "output/is_canal_optimized.obj")
 
 print("Done. Exiting FreeCAD...")
 sys.exit(0)

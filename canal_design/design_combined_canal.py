@@ -56,7 +56,7 @@ canal_obj.Shape = canal_shell
 doc.recompute()
 
 # --- EXPORT ---
-output_path = "/home/kaiser/gemini_project2/combined_canal_section.obj"
+output_path = "output/combined_canal_section.obj"
 print(f"📦 Exporting to {output_path} ...")
 Mesh.export([canal_obj], output_path)
 print("✅ Export complete. Exiting...")

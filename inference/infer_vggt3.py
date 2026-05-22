@@ -45,7 +45,7 @@ def infer_vggt3(image_dir, weights_path, output_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VGG-T³ JAX Inference")
     parser.add_argument("--image_dir", type=str, required=True, help="Path to folder with images")
-    parser.add_argument("--weights", type=str, default="/home/kaiser/gemini_project2/weights/vggt_1b.msgpack", help="Path to weights")
+    parser.add_argument("--weights", type=str, default="weights/vggt_1b.msgpack", help="Path to weights")
     parser.add_argument("--output", type=str, default="output/vggt3_results", help="Output directory")
     args = parser.parse_args()
     

@@ -171,4 +171,4 @@ if __name__ == "__main__":
     
     designer = ISCanalDesigner(Q=DESIGN_Q, bed_slope=SLOPE)
     designer.calculate_is_parameters()
-    designer.generate_3d_model(ALIGNMENT, "/home/kaiser/gemini_project2/is_canal_v2.glb")
+    designer.generate_3d_model(ALIGNMENT, "output/is_canal_v2.glb")

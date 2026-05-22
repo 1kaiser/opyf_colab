@@ -71,7 +71,7 @@ def generate_reach():
 
     doc.recompute()
     
-    output_obj = "/home/kaiser/gemini_project2/reach12_model.obj"
+    output_obj = "output/reach12_model.obj"
     print(f"Exporting to {output_obj}...")
     Mesh.export(objs, output_obj)
     print("Export complete.")
