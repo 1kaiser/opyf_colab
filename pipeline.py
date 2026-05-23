@@ -6,10 +6,10 @@ Stages
 0. Download release assets (video, weights, ortho, MNT) if missing
 1. Extract frames from event video
 2. Load Depth Pro weights
-3. Load ortho + dry mask
-4. Load & rasterise MNT bed model
-5. Per-frame depth inference + scale solve + flow depth
-6. Aggregate frames (median) → flow_depth.tif
+3. Load ortho + MNT bed
+4. Per-frame depth inference + GCP alignment (LightGlue) + flow depth
+5. Aggregate frames (median) → flow_depth.tif
+6. Point cloud alignment + water volume → assets/alignment_*.png
 7. Run JAX canal optimizer
 8. Build annotated visualisation → assets/annotated_pipeline.png
 
@@ -28,8 +28,11 @@ Options
 --n-frames   N     Number of frames to sample (default: 5)
 --skip-download    Skip automatic asset download
 --skip-depth       Skip depth inference if output/brague/flow_depth.tif exists
+--skip-align       Skip point cloud alignment + water volume visualisation
 --skip-canal       Skip canal optimisation if canal_design/canal_params.json exists
---skip-viz         Skip visualisation step
+--skip-viz         Skip annotated pipeline visualisation
+--sp-weights PATH  SuperPoint weights (default: weights/superpoint.msgpack)
+--lg-weights PATH  LightGlue weights (default: weights/superpoint_lightglue.msgpack)
 """
 
 import argparse
@@ -203,6 +206,60 @@ def run_depth_pipeline(args) -> dict:
     return meta
 
 
+# ── stage 6b: point cloud alignment + water volume ───────────────────────────
+
+def run_alignment_stage(
+    out_dir: Path, z_bed, transform, X_mnt, Y_mnt, Z_mnt, assets: Path,
+    sp_weights: str, lg_weights: str,
+) -> dict | None:
+    """Align the first extracted frame's Depth Pro output to the ortho/MNT."""
+    banner("STAGE 6b: Point cloud alignment + water volume")
+
+    from modules.align_pointclouds import run_alignment, visualise_alignment
+    from modules.infer_features import load_feature_models
+
+    # Use the first frame that has a saved inv_depth .npy
+    frames_dir = out_dir / "frames"
+    inv_depth_files = sorted(frames_dir.glob("*.npy")) if frames_dir.exists() else []
+    if not inv_depth_files:
+        # Check out_dir directly
+        inv_depth_files = sorted(out_dir.glob("frame_*.npy"))
+
+    if not inv_depth_files:
+        print("  No inv_depth .npy found — skipping alignment")
+        print("  Tip: depth_to_elevation saves .tif but not .npy; "
+              "run infer_depth.py standalone to get .npy")
+        return None
+
+    # Find matching frame PNG
+    inv_npy = inv_depth_files[0]
+    frame_png = inv_npy.with_suffix(".png")
+    if not frame_png.exists():
+        frame_png = frames_dir / (inv_npy.stem + ".png")
+    if not frame_png.exists():
+        print(f"  Frame PNG not found for {inv_npy.name} — skipping alignment")
+        return None
+
+    import numpy as np
+    inv_depth = np.load(inv_npy)
+    print(f"  Using frame: {frame_png.name}  inv_depth: {inv_depth.shape}")
+
+    sp_jit, sp_vars, lg_jit, lg_vars = load_feature_models(sp_weights, lg_weights)
+
+    ortho_path = str(REPO / "data" / "brague" / "Ortho.tif")
+    result = run_alignment(
+        str(frame_png), inv_depth, ortho_path, z_bed, transform,
+        X_mnt, Y_mnt, Z_mnt,
+        sp_jit, sp_vars, lg_jit, lg_vars,
+    )
+
+    paths = visualise_alignment(result, str(frame_png), ortho_path, str(assets))
+    print(f"  Water volume  : {result['volume_m3']:,.1f} m³")
+    print(f"  Inundated area: {result['area_m2']:,.0f} m²")
+    print(f"  Bank GCPs     : {len(result['gcp_xyz'])}")
+    return result
+
+
 # ── stage 7: canal optimiser ─────────────────────────────────────────────────
 
 def run_canal_optimizer(meta: dict, out_dir_canal: Path) -> dict:
@@ -264,14 +321,14 @@ def parse_args():
     p.add_argument("--out-dir",       default="output/brague")
     p.add_argument("--assets",        default="assets")
     p.add_argument("--n-frames",      type=int, default=5)
-    p.add_argument("--skip-download", action="store_true",
-                   help="Skip automatic release asset download")
-    p.add_argument("--skip-depth",    action="store_true",
-                   help="Skip depth inference if flow_depth.tif already exists")
-    p.add_argument("--skip-canal",    action="store_true",
-                   help="Skip canal optimisation if canal_params.json already exists")
-    p.add_argument("--skip-viz",      action="store_true",
-                   help="Skip visualisation step")
+    p.add_argument("--sp-weights",    default="weights/superpoint.msgpack")
+    p.add_argument("--lg-weights",    default="weights/superpoint_lightglue.msgpack")
+    p.add_argument("--skip-download", action="store_true")
+    p.add_argument("--skip-depth",    action="store_true")
+    p.add_argument("--skip-align",    action="store_true",
+                   help="Skip point cloud alignment + water volume")
+    p.add_argument("--skip-canal",    action="store_true")
+    p.add_argument("--skip-viz",      action="store_true")
     return p.parse_args()
 
 
@@ -296,16 +353,39 @@ def main():
     flow_tif  = out_dir / "flow_depth.tif"
 
     if args.skip_depth and flow_tif.exists() and meta_path.exists():
-        banner("STAGE 1-6: Depth pipeline (SKIPPED — using cached outputs)")
+        banner("STAGE 1-5: Depth pipeline (SKIPPED — using cached outputs)")
         with open(meta_path) as f:
             meta = json.load(f)
         print(f"  Loaded meta: {meta_path}")
+        # Still need z_bed + transform for alignment stage
+        _z_bed = _transform = _X_mnt = _Y_mnt = _Z_mnt = None
     else:
         check_file(Path(args.video),   "Video")
         check_file(Path(args.mnt),     "MNT")
         check_file(Path(args.ortho),   "Ortho")
         check_file(Path(args.weights), "Weights")
         meta = run_depth_pipeline(args)
+        _z_bed = _transform = _X_mnt = _Y_mnt = _Z_mnt = None   # loaded lazily below
+
+    # ── stage 6b: point cloud alignment + water volume ──────────────────────
+    if not args.skip_align:
+        import numpy as np, rasterio as _rio
+        from modules.depth_to_elevation import load_mnt, rasterise_mnt
+        from rasterio.transform import from_bounds
+
+        if _z_bed is None:
+            with _rio.open(args.ortho) as src:
+                _transform = src.transform
+                _ortho_shape = (src.height, src.width)
+            _X_mnt, _Y_mnt, _Z_mnt = load_mnt(args.mnt, subsample=5)
+            _z_bed = rasterise_mnt(_X_mnt, _Y_mnt, _Z_mnt, _transform, _ortho_shape)
+
+        run_alignment_stage(
+            out_dir, _z_bed, _transform, _X_mnt, _Y_mnt, _Z_mnt, assets,
+            args.sp_weights, args.lg_weights,
+        )
+    else:
+        banner("STAGE 6b: Point cloud alignment (SKIPPED)")
 
     # ── canal optimiser ─────────────────────────────────────────────────────
     cp_path = canal_dir / "canal_params.json"
@@ -328,9 +408,12 @@ def main():
     elapsed = time.time() - t_total
     banner("DONE")
     print(f"  Elapsed       : {elapsed:.1f} s")
-    print(f"  flow_depth.tif: {flow_tif}")
-    print(f"  canal_params  : {cp_path}")
-    print(f"  pipeline viz  : {assets / 'annotated_pipeline.png'}")
+    print(f"  flow_depth.tif     : {flow_tif}")
+    print(f"  alignment_matches  : {assets / 'alignment_matches.png'}")
+    print(f"  alignment_clouds   : {assets / 'alignment_pointclouds.png'}")
+    print(f"  alignment_overlay  : {assets / 'alignment_depth_overlay.png'}")
+    print(f"  canal_params       : {cp_path}")
+    print(f"  pipeline viz       : {assets / 'annotated_pipeline.png'}")
     print()
     print("  Key results:")
     print(f"    h_mean (flow depth)    = {meta['h_final_mean']:.3f} m")
