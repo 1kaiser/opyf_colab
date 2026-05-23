@@ -291,15 +291,19 @@ IS code constraints applied after:
 
 ---
 
-### 🌐 Stage 7b — JAX D8 Thalweg: Slope · Curvature · Bearing
+### 🌐 Stage 6c/7b — JAX D8 Thalweg + Canal 3D Overlay
+
+<img src="assets/d8_thalweg.png" width="100%"/>
+
+*D8 flow accumulation heatmap with extracted thalweg centreline (Stage 6c). Reports thalweg length, mean bed slope, and invert elevation drop.*
 
 <img src="assets/canal_3d_overlay.png" width="100%"/>
 
-*Five-panel geo-referenced overlay: **A** 3D terrain+flood+section · **B** plan view with D8 accumulation heatmap + curvature-coded centreline · **C** curvature vs IS 5968 minimum · **D** longitudinal profile · **E** mid-reach cross-section.*
+*Five-panel geo-referenced overlay (Stage 7b): **A** 3D terrain+flood+section · **B** plan view with D8 accumulation heatmap + curvature-coded centreline · **C** curvature vs IS 5968 minimum · **D** longitudinal profile · **E** mid-reach cross-section.*
 
-<img src="assets/ortho_alignment_check.png" width="100%"/>
+<img src="assets/pointcloud_ortho_check.png" width="100%"/>
 
-*Alignment check: wet mask boundary + MNT contours on Ortho (left) · flow depth colourmap (centre) · D8 thalweg + accumulation on Ortho (right).*
+*MNT.xyz × Ortho.tif alignment check (Stage 6d): 3D coloured point cloud · top-down ortho+elevation overlay · elevation heatmap · Z histogram by colour class (vegetation / water / urban).*
 
 <details>
 <summary>🔍 JAX D8 pipeline — fill → directions → accumulation → thalweg (Ancey §5.1.4, §5.5–5.6)</summary>
@@ -334,6 +338,16 @@ flow_depth.tif  ──► Z_bed = Z_surface − h
 ```
 
 </details>
+
+---
+
+### 🌊 Stage 7d — JAX LSPIV Surface Velocity + Discharge
+
+<img src="assets/lspiv_results.png" width="100%"/>
+
+*Six-panel LSPIV result: **A** 3D velocity scatter · **B** MNT terrain + water plane + transect · **C** plan view ortho + velocity field + transect endpoints · **D** cross-section bathymetry + velocity + Q annotation · **E** orthorectified frame (bird-eye DLT) · **F** ortho thumbnail.*
+
+Discharge Q = α ∫ V · h dl, α = 0.9. Processes **IMG_1139** (downstream bridge) and **IMG_1142** (upstream bridge) simultaneously.
 
 ---
 

@@ -134,6 +134,14 @@ def run_depth_pipeline(args) -> dict:
     banner("STAGE 1: Extract event frames")
     frames = extract_frames(args.video, out_dir / "frames", args.n_frames)
 
+    # Copy first frame → assets/frame_sample.png
+    if frames:
+        import shutil
+        assets_path = REPO / args.assets
+        assets_path.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(frames[0], assets_path / "frame_sample.png")
+        print(f"  Frame sample → {assets_path / 'frame_sample.png'}")
+
     # Stage 2 – model
     banner("STAGE 2: Load Depth Pro")
     jit_fn, variables = load_depth_pro(args.weights)
@@ -214,7 +222,68 @@ def run_depth_pipeline(args) -> dict:
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     print(f"  Metadata → {meta_path}")
+
+    # Save flow_depth_result.png → assets/
+    _save_flow_depth_result(h_final, z_bed, ortho_shape, REPO / args.assets)
+
     return meta
+
+
+def _save_flow_depth_result(h_final: "np.ndarray", z_bed: "np.ndarray",
+                             ortho_shape: tuple, assets: Path):
+    """Save a 2-panel flow depth summary figure to assets/flow_depth_result.png."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        BG = "#0d1117"; TC = "#e8e8e8"; DIM = "#a0a0a0"
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        fig.patch.set_facecolor(BG)
+
+        for ax in axes:
+            ax.set_facecolor(BG)
+            for sp in ax.spines.values():
+                sp.set_color("#303040")
+            ax.tick_params(colors="#808080", labelsize=7)
+
+        # Panel A: flow depth h
+        wet = h_final > 0
+        h_show = np.where(wet, h_final, np.nan)
+        im0 = axes[0].imshow(h_show, cmap="Blues", origin="upper",
+                              vmin=0, vmax=np.nanpercentile(h_show, 99))
+        cb0 = fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+        cb0.set_label("Flow depth h (m)", color=DIM, fontsize=8)
+        cb0.ax.tick_params(colors="#808080", labelsize=7)
+        axes[0].set_title(
+            f"Flow Depth  h(x,y)\n"
+            f"h_mean={np.nanmean(h_show):.3f} m  h_max={np.nanmax(h_show):.3f} m  "
+            f"wet={wet.sum():,} px",
+            color=TC, fontsize=9, pad=5,
+        )
+
+        # Panel B: bed elevation z_bed
+        z_valid = np.where(np.isfinite(z_bed), z_bed, np.nan)
+        im1 = axes[1].imshow(z_valid, cmap="terrain", origin="upper")
+        cb1 = fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        cb1.set_label("Bed elevation Z_bed (m)", color=DIM, fontsize=8)
+        cb1.ax.tick_params(colors="#808080", labelsize=7)
+        axes[1].set_title(
+            "Bed elevation Z_bed(x,y)  [Lambert-93 MNT]",
+            color=TC, fontsize=9, pad=5,
+        )
+
+        fig.suptitle("opyf_colab — Flow Depth + Bed Elevation",
+                     color=TC, fontsize=10, y=1.01)
+        assets.mkdir(parents=True, exist_ok=True)
+        out = assets / "flow_depth_result.png"
+        fig.savefig(out, dpi=130, bbox_inches="tight",
+                    facecolor=fig.get_facecolor())
+        plt.close(fig)
+        print(f"  flow_depth_result → {out}")
+    except Exception as exc:
+        print(f"  [WARN] flow_depth_result save failed: {exc}")
 
 
 # ── stage 6b: point cloud alignment + water volume ───────────────────────────
@@ -273,23 +342,20 @@ def run_alignment_stage(
 
 # ── stage 7: canal optimiser ─────────────────────────────────────────────────
 
-def run_canal_optimizer(meta: dict, out_dir_canal: Path) -> dict:
+def run_canal_optimizer(meta: dict, out_dir_canal: Path, assets: Path = None) -> dict:
     """Run JAX canal optimiser using Q derived from pipeline meta."""
     banner("STAGE 7: JAX Canal Optimizer")
 
-    from modules.canal_optimizer import optimise_canal
+    from modules.canal_optimizer import optimise_canal, plot_canal_section, plot_design_chain
 
     h_mean = meta["h_final_mean"]
-    # Estimate Q with alpha=0.9, V=1.0 m/s (from depth-mean velocity)
-    # Q = alpha * V_surface * h * A_wet_m2
-    # A_wet ~ wet_pixels * (2.4e-3)^2
     px_area = (2.4e-3) ** 2  # 2.4 mm pixel
     avg_wet = sum(f["wet_pixels"] for f in meta["frames"]) / len(meta["frames"])
     A_wet   = avg_wet * px_area
     alpha   = 0.9
-    V_est   = 1.0   # conservative surface velocity estimate
-    Q_target = alpha * V_est * h_mean * (A_wet ** 0.5) * 0.1  # rough Q
-    Q_target = max(Q_target, 50.0)   # ensure meaningful design flood
+    V_est   = 1.0
+    Q_target = alpha * V_est * h_mean * (A_wet ** 0.5) * 0.1
+    Q_target = max(Q_target, 50.0)
     print(f"  Estimated Q_target ≈ {Q_target:.1f} m³/s")
 
     params = optimise_canal(Q_target=Q_target)
@@ -298,8 +364,23 @@ def run_canal_optimizer(meta: dict, out_dir_canal: Path) -> dict:
     with open(out_path, "w") as f:
         json.dump(params, f, indent=4)
     print(f"  Canal params → {out_path}")
-    print(f"  B={params['bed_width']:.2f} m  D={params['water_depth']:.2f} m  "
-          f"Q_calc={params['calculated_discharge']:.2f} m³/s")
+    print(f"  B={params['bed_width_m']:.2f} m  D={params['water_depth_m']:.2f} m  "
+          f"Q_calc={params['Q_calculated_m3s']:.2f} m³/s")
+
+    # Generate canal_section.png and design_chain.png → assets/
+    if assets is not None:
+        assets.mkdir(parents=True, exist_ok=True)
+        try:
+            plot_canal_section(params, out_path=str(assets / "canal_section.png"))
+            print(f"  canal_section → {assets / 'canal_section.png'}")
+        except Exception as exc:
+            print(f"  [WARN] canal_section plot failed: {exc}")
+        try:
+            plot_design_chain(params, out_path=str(assets / "design_chain.png"))
+            print(f"  design_chain  → {assets / 'design_chain.png'}")
+        except Exception as exc:
+            print(f"  [WARN] design_chain plot failed: {exc}")
+
     return params
 
 
@@ -566,6 +647,7 @@ def run_lspiv(
 def run_visualisation(assets_dir: Path):
     banner("STAGE 8: Annotated pipeline visualisation")
     from modules.annotated_pipeline_viz import load_all, build_figure
+    import matplotlib.pyplot as plt
 
     d = load_all()
     fig = build_figure(d)
@@ -573,9 +655,23 @@ def run_visualisation(assets_dir: Path):
     assets_dir.mkdir(parents=True, exist_ok=True)
     out_path = assets_dir / "annotated_pipeline.png"
     fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor="#0d1117")
-    import matplotlib.pyplot as plt
     plt.close(fig)
     print(f"  Saved → {out_path}  ({out_path.stat().st_size // 1024} KB)")
+
+    # future_roadmap.png
+    try:
+        from modules.future_roadmap_viz import build_roadmap_figure
+        build_roadmap_figure(out_path=str(assets_dir / "future_roadmap.png"))
+    except Exception as exc:
+        print(f"  [WARN] future_roadmap failed: {exc}")
+
+    # multiview_comparison.png — copy from output/brague if it exists there
+    import shutil
+    src = REPO / "output" / "brague" / "multiview_comparison.png"
+    dst = assets_dir / "multiview_comparison.png"
+    if src.exists() and not dst.exists():
+        shutil.copy2(src, dst)
+        print(f"  multiview_comparison → {dst}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -691,7 +787,7 @@ def main():
             canal_params = json.load(f)
         print(f"  Loaded: {cp_path}")
     else:
-        canal_params = run_canal_optimizer(meta, canal_dir)
+        canal_params = run_canal_optimizer(meta, canal_dir, assets)
 
     # ── stage 7b: canal 3D overlay  +  stage 7c: CAD drawing ─────────────────
     reach_geo = None

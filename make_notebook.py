@@ -267,7 +267,7 @@ if SKIP_CANAL and cp_path.exists():
     print("Canal optimizer skipped — loaded", cp_path)
 else:
     from pipeline import run_canal_optimizer
-    canal_params = run_canal_optimizer(meta, canal_dir)
+    canal_params = run_canal_optimizer(meta, canal_dir, Path(ASSETS_DIR))
 
 print(f"  B = {canal_params['bed_width_m']:.3f} m")
 print(f"  D = {canal_params['water_depth_m']:.3f} m")
@@ -275,6 +275,16 @@ print(f"  Q = {canal_params['Q_calculated_m3s']:.2f} m³/s")
 print(f"  V = {canal_params['velocity_ms']:.3f} m/s")
 print(f"  n = {canal_params['manning_n']:.4f}")
 print(f"  S = {canal_params['long_slope']:.6f}")
+"""))
+
+CELLS.append(code(
+    """\
+# Display canal_section.png and design_chain.png
+for fname in ("canal_section.png", "design_chain.png"):
+    img_path = Path(ASSETS_DIR) / fname
+    if img_path.exists():
+        print(fname)
+        display(Image(str(img_path), width=700))
 """))
 
 # ── Stage 7b canal viz ────────────────────────────────────────────────────────
@@ -401,9 +411,11 @@ else:
 
 CELLS.append(code(
     """\
-pipeline_img = Path(ASSETS_DIR) / "annotated_pipeline.png"
-if pipeline_img.exists():
-    display(Image(str(pipeline_img), width=900))
+for fname in ("annotated_pipeline.png", "future_roadmap.png", "multiview_comparison.png"):
+    img_path = Path(ASSETS_DIR) / fname
+    if img_path.exists():
+        print(fname)
+        display(Image(str(img_path), width=900))
 """))
 
 # ── Summary ───────────────────────────────────────────────────────────────────
