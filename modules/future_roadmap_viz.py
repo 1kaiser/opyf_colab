@@ -1,14 +1,16 @@
 """
 modules/future_roadmap_viz.py
 ==============================
-Generates assets/future_roadmap.png — a single figure showing the three
-planned future extensions and how they connect to the existing pipeline output.
+Generates assets/future_roadmap.png — architecture diagram showing five planned
+future extensions and how they connect to the existing pipeline outputs.
 
-  Canal section (Stage 7)
+  Canal section (Stage 7)  +  D8 thalweg (Stage 7b)
         │
-        ├── JAX CFD / Saint-Venant  ─── flood routing, Q_sim vs Q_target
-        ├── JAX FEM                 ─── structural: lining stress, reinforcement
-        └── Surface → Soil          ─── ortho texture → USCS class → bearing capacity
+        ├── GRAINnet          ─── d50/d90 → Manning's n → calibrated Q
+        ├── JAX CFD           ─── supercritical flow stability, drop spacing
+        ├── JAX FEM (super)   ─── lining stress IS 456 / IS 3370
+        ├── JAX FEM (sub)     ─── foundation bearing IS 6403 / IS 8009
+        └── Surface → Soil    ─── ortho texture → USCS class → soil params
 """
 
 from pathlib import Path
@@ -17,175 +19,208 @@ from pathlib import Path
 def build_roadmap_figure(out_path: str = "assets/future_roadmap.png"):
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
-    from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+    from matplotlib.patches import FancyBboxPatch
     import numpy as np
 
-    fig, ax = plt.subplots(figsize=(16, 9))
+    fig, ax = plt.subplots(figsize=(20, 11))
     fig.patch.set_facecolor("#0d1117")
     ax.set_facecolor("#0d1117")
-    ax.set_xlim(0, 16)
-    ax.set_ylim(0, 9)
+    ax.set_xlim(0, 20)
+    ax.set_ylim(0, 11)
     ax.axis("off")
 
-    # ── colour palette ────────────────────────────────────────────────
     C = {
-        "existing":  "#1a4a7a",
-        "cfd":       "#1a5a3a",
-        "fem":       "#5a3a1a",
-        "soil":      "#4a1a5a",
-        "border_e":  "#3080d0",
-        "border_c":  "#30c060",
-        "border_f":  "#d08030",
-        "border_s":  "#c030c0",
-        "text":      "#e8e8e8",
-        "dim":       "#a0a0a0",
-        "arrow":     "#606070",
+        "existing":  "#1a4a7a",  "border_e":  "#3080d0",
+        "grain":     "#0d4a4a",  "border_g":  "#20c0b0",
+        "cfd":       "#1a5a3a",  "border_c":  "#30c060",
+        "fem_sup":   "#5a3a1a",  "border_fs": "#d08030",
+        "fem_sub":   "#5a2a1a",  "border_fb": "#e05020",
+        "soil":      "#4a1a5a",  "border_s":  "#c030c0",
+        "text":      "#e8e8e8",  "dim":       "#a0a0a0",
+        "arrow":     "#505060",
     }
 
-    def box(ax, x, y, w, h, fc, ec, text_lines, fontsize=8.5, title=None):
+    def box(ax, x, y, w, h, fc, ec, lines, fs=7.8, title=None):
         rect = FancyBboxPatch((x, y), w, h,
-                              boxstyle="round,pad=0.08",
-                              facecolor=fc, edgecolor=ec, linewidth=1.8, zorder=3)
+                              boxstyle="round,pad=0.07",
+                              facecolor=fc, edgecolor=ec,
+                              linewidth=1.8, zorder=3)
         ax.add_patch(rect)
         if title:
-            ax.text(x + w/2, y + h - 0.22, title, color="#ffffff",
-                    fontsize=fontsize + 1, ha="center", va="top",
-                    fontweight="bold", zorder=4)
-        for i, line in enumerate(text_lines):
-            ax.text(x + w/2, y + h - 0.52 - i * 0.32, line,
-                    color=C["dim"], fontsize=fontsize - 0.5,
+            ax.text(x + w/2, y + h - 0.20, title,
+                    color="#ffffff", fontsize=fs + 1,
+                    ha="center", va="top", fontweight="bold", zorder=4)
+        for i, line in enumerate(lines):
+            ax.text(x + w/2, y + h - 0.48 - i * 0.28, line,
+                    color=C["dim"], fontsize=fs - 0.5,
                     ha="center", va="top", zorder=4)
 
-    def arrow(ax, x0, y0, x1, y1, color=C["arrow"]):
+    def arr(ax, x0, y0, x1, y1, col=C["arrow"]):
         ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
-                    arrowprops=dict(arrowstyle="-|>", color=color, lw=1.8),
+                    arrowprops=dict(arrowstyle="-|>", color=col, lw=1.6),
                     zorder=5)
 
-    # ──────────────────────────────────────────────────────────────────
-    # Row 1 — existing pipeline outputs (inputs to future work)
-    # ──────────────────────────────────────────────────────────────────
-    ax.text(8, 8.7, "Future Extension Roadmap", color=C["text"], fontsize=14,
-            ha="center", va="top", fontweight="bold")
-    ax.text(8, 8.35, "Connecting existing pipeline outputs to structural, hydraulic, and geotechnical design",
+    # ── title ─────────────────────────────────────────────────────────
+    ax.text(10, 10.7, "Future Extension Roadmap", color=C["text"],
+            fontsize=15, ha="center", va="top", fontweight="bold")
+    ax.text(10, 10.32,
+            "Grain size  ·  Flow stability  ·  Lining design  ·  Foundation design  ·  Soil composition",
             color=C["dim"], fontsize=9, ha="center", va="top")
 
-    # Existing outputs (top row)
-    box(ax, 0.3, 6.5, 3.2, 1.6, C["existing"], C["border_e"],
-        ["h(x,y) flow depth raster", "Z_surface, Z_bed", "wet area ~39 700 m²",
-         "water volume (m³)"],
-        title="Flow Depth  (Stage 6a/b)")
+    # ── Row 1: existing pipeline outputs ──────────────────────────────
+    ax.text(0.15, 9.35, "Existing outputs", color=C["border_e"],
+            fontsize=7.5, va="top", style="italic")
+    ax.axhline(9.3, color="#252535", lw=0.8, ls="--", zorder=1)
 
-    box(ax, 4.1, 6.5, 3.2, 1.6, C["existing"], C["border_e"],
-        ["B = 2.59 m, D = 4.27 m", "V = 1.30 m/s, Q = 50 m³/s",
-         "IS 5968 / IS 10430 ✓", "canal_params.json"],
+    box(ax, 0.2,  7.6, 3.2, 1.6, C["existing"], C["border_e"],
+        ["h(x,y)  Z_surface  Z_bed",
+         "wet area · water volume",
+         "D8 thalweg  S=1:55",
+         "curvature R_min=1.6 m"],
+        title="Flow Depth + D8 (6a–7b)")
+
+    box(ax, 3.8,  7.6, 3.2, 1.6, C["existing"], C["border_e"],
+        ["B=2.59 m  D=4.27 m",
+         "V=1.30 m/s  Q=50 m³/s",
+         "IS 5968 / IS 10430 ✓",
+         "n=0.018 assumed"],
         title="Canal Design  (Stage 7)")
 
-    box(ax, 7.9, 6.5, 3.2, 1.6, C["existing"], C["border_e"],
-        ["canal_model.obj / .step", "canal_section.step", "1 km IS alignment",
+    box(ax, 7.4,  7.6, 3.2, 1.6, C["existing"], C["border_e"],
+        ["canal_model.obj / .step",
+         "canal_section.step",
+         "IS alignment 1 km",
          "compound section option"],
-        title="FreeCAD 3D Model  (Stage 7)")
+        title="FreeCAD 3D  (Stage 7c)")
 
-    box(ax, 11.7, 6.5, 3.8, 1.6, C["existing"], C["border_e"],
-        ["Ortho.tif  2.4 mm/px", "MNT.xyz  4.9 mm pts", "EPSG:2154 Lambert-93",
+    box(ax, 11.0, 7.6, 4.2, 1.6, C["existing"], C["border_e"],
+        ["Ortho.tif  2.4 mm/px",
+         "MNT.xyz  4.9 mm pts",
+         "EPSG:2154 Lambert-93",
          "bank GCPs (LightGlue)"],
         title="Geospatial Data  (Stage 0–6b)")
 
-    # ──────────────────────────────────────────────────────────────────
-    # Row 2 — future modules
-    # ──────────────────────────────────────────────────────────────────
+    box(ax, 15.6, 7.6, 4.2, 1.6, C["existing"], C["border_e"],
+        ["337-px D8 path · S=1:55",
+         "R_min=1.6 m vs IS 1000 m",
+         "bearing_deg(s)",
+         "slope_local(s)"],
+        title="D8 Thalweg  (Stage 7b)")
 
-    # A — JAX CFD Water Simulation
-    box(ax, 0.3, 3.5, 4.6, 2.6, C["cfd"], C["border_c"],
-        ["Saint-Venant 2D shallow water",
-         "flood routing: Q_sim(t) vs Q_target",
-         "inundation extent vs Ortho.tif",
-         "velocity field V(x,y,t)",
-         "Candidate: google/jax-cfd",
-         "or web/jax-js-fem prototype"],
-        title="JAX Water Simulation")
-
-    # B — JAX FEM Structural
-    box(ax, 5.5, 3.5, 4.6, 2.6, C["fem"], C["border_f"],
-        ["Canal section → FEM mesh",
-         "Hydrostatic + soil pressure loads",
-         "IS 456:2000 concrete design",
-         "IS 3370:2009 liquid-retaining",
-         "Steel schedule, slab thickness",
-         "Candidate: tianjuxue/jax-fem"],
-        title="JAX FEM — Structural")
-
-    # C — Surface → Soil
-    box(ax, 10.7, 3.5, 5.0, 2.6, C["soil"], C["border_s"],
-        ["Ortho.tif → SegNet / DINO features",
-         "Pixel class: cobble / sand / concrete",
-         "USCS / IS 1498 texture→soil lookup",
-         "soil_class(X,Y): GW · SP · CL …",
-         "Bearing capacity q_ult(x,y)",
-         "0–1 m composition without borehole"],
-        title="Surface Material → Soil Composition")
-
-    # ──────────────────────────────────────────────────────────────────
-    # Row 3 — combined outputs
-    # ──────────────────────────────────────────────────────────────────
-    box(ax, 1.5, 0.5, 5.5, 2.6, "#1a2a3a", C["border_e"],
-        ["Q_sim ≈ Q_target  (hydraulic validation)",
-         "Flood map overlay on Ortho  (accuracy check)",
-         "Peak discharge timing",
-         "Optimise slope / dimensions iteratively"],
-        title="Hydraulic Validation")
-
-    box(ax, 8.5, 0.5, 6.8, 2.6, "#2a1a2a", C["border_e"],
-        ["Reinforcement drawing (mm² / m)",
-         "Foundation depth from bearing capacity",
-         "Settlement estimate from soil composition",
-         "Complete design dossier (IS 456 / IS 3370 / IS 1498)"],
-        title="Structural + Geotechnical Design")
-
-    # ──────────────────────────────────────────────────────────────────
-    # Arrows — top row → future modules
-    # ──────────────────────────────────────────────────────────────────
-    # flow depth → JAX CFD
-    arrow(ax, 1.9, 6.5, 2.1, 6.1); arrow(ax, 2.1, 6.1, 2.6, 6.1)
-    # canal params → JAX CFD
-    arrow(ax, 5.7, 6.5, 3.8, 6.1)
-    # canal params → JAX FEM
-    arrow(ax, 5.7, 6.5, 7.8, 6.1)
-    # canal 3D → JAX FEM
-    arrow(ax, 9.5, 6.5, 7.8, 6.1)
-    # geodata → soil
-    arrow(ax, 13.6, 6.5, 13.2, 6.1)
-    # canal params → soil (soil loading)
-    arrow(ax, 7.3, 6.5, 12.0, 6.1)
-
-    # future modules → outputs
-    arrow(ax, 2.6, 3.5, 4.2, 3.1)
-    arrow(ax, 7.8, 3.5, 10.0, 3.1)
-    arrow(ax, 13.2, 3.5, 12.0, 3.1)
-
-    # label lines
-    for y_line in [6.45, 3.45]:
-        ax.axhline(y_line, color="#2a2a3a", lw=0.8, ls="--", zorder=1)
-
-    ax.text(0.15, 6.45, "Existing outputs", color=C["border_e"],
+    # ── Row 2: future modules ──────────────────────────────────────────
+    ax.text(0.15, 7.0, "Future modules", color=C["dim"],
             fontsize=7.5, va="top", style="italic")
-    ax.text(0.15, 3.45, "Future modules", color=C["dim"],
-            fontsize=7.5, va="top", style="italic")
+    ax.axhline(6.95, color="#252535", lw=0.8, ls="--", zorder=1)
 
-    legend_handles = [
-        mpatches.Patch(fc=C["existing"], ec=C["border_e"], label="Existing pipeline"),
-        mpatches.Patch(fc=C["cfd"],      ec=C["border_c"], label="JAX CFD / water sim"),
-        mpatches.Patch(fc=C["fem"],      ec=C["border_f"], label="JAX FEM / structural"),
-        mpatches.Patch(fc=C["soil"],     ec=C["border_s"], label="Surface → soil"),
+    # A — GRAINnet
+    box(ax, 0.2,  4.5, 3.5, 2.1, C["grain"], C["border_g"],
+        ["d50 / d84 / d90 (mm)",
+         "Strickler:  n = d90^(1/6)/Ks",
+         "spatially variable n(X,Y)",
+         "recalibrate Q  (±40–100 %)"],
+        title="GRAINnet  (1kaiser/GRAINnet)")
+
+    # B — JAX CFD
+    box(ax, 4.1,  4.5, 3.5, 2.1, C["cfd"], C["border_c"],
+        ["Fr = V/√(gD)  →  super/subcritical",
+         "hydraulic jump loc X_j",
+         "drop structure spacing",
+         "EGL(x)  overtopping check"],
+        title="JAX Fluid Solver  (superstructure)")
+
+    # C — JAX FEM superstructure
+    box(ax, 8.0,  4.5, 3.8, 2.1, C["fem_sup"], C["border_fs"],
+        ["hydrostatic + earth pressure",
+         "IS 456:2000 limit-state",
+         "IS 3370:2009 crack ≤ 0.2 mm",
+         "steel schedule  slab t"],
+        title="JAX FEM — Lining  (IS 456/3370)")
+
+    # D — JAX FEM substructure
+    box(ax, 12.2, 4.5, 3.8, 2.1, C["fem_sub"], C["border_fb"],
+        ["q_ult = cNc + γDNq  (IS 6403)",
+         "settlement δ  (IS 8009)",
+         "seepage uplift  cut-off depth",
+         "scour apron length (IS 8237)"],
+        title="JAX FEM — Foundation  (IS 6403/8009)")
+
+    # E — Surface → Soil
+    box(ax, 16.3, 4.5, 3.5, 2.1, C["soil"], C["border_s"],
+        ["SegNet/DINO → surface class",
+         "GW·SW·CL·CH (USCS/IS 1498)",
+         "φ  c  γ  k  (0–1 m depth)",
+         "no borehole needed"],
+        title="Surface → Soil  (ortho classification)")
+
+    # ── Row 3: combined design outputs ────────────────────────────────
+    box(ax, 0.2,  1.2, 5.8, 2.9, "#0e1e2e", C["border_e"],
+        ["Manning n(X,Y) from GRAINnet",
+         "Q re-estimated with real n",
+         "IS 10430 n=0.018 validated/corrected",
+         "Drop structures: number · spacing",
+         "Stilling basin: L_b · depth · apron",
+         "Fr profile along thalweg"],
+        title="Hydraulic Validation + Roughness Calibration")
+
+    box(ax, 6.4,  1.2, 6.8, 2.9, "#1e1020", C["border_e"],
+        ["Lining: slab t · steel A_s (mm²/m)",
+         "Joint spacing (thermal IS 456)",
+         "Foundation: D_f · raft dims",
+         "Cut-off wall depth (anti-seepage)",
+         "Scour apron length",
+         "IS 456 / IS 3370 / IS 6403 / IS 8009 / IS 8237"],
+        title="Complete Structural + Geotechnical Design Dossier")
+
+    box(ax, 13.6, 1.2, 6.2, 2.9, "#1e0e20", C["border_e"],
+        ["soil_class(X,Y): GW / SW / CL",
+         "φ(X,Y)  c(X,Y)  γ(X,Y)  k(X,Y)",
+         "Bearing capacity q_ult(X,Y)",
+         "Settlement δ(X,Y)",
+         "Permeability k → seepage head",
+         "0–1 m profile without borehole"],
+        title="Spatial Soil Parameter Map")
+
+    # ── arrows top → middle ───────────────────────────────────────────
+    arr(ax, 1.8,  7.6, 1.9,  6.6)    # flow depth → GRAINnet
+    arr(ax, 1.8,  7.6, 5.8,  6.6)    # flow depth → CFD
+    arr(ax, 5.4,  7.6, 9.8,  6.6)    # canal design → FEM super
+    arr(ax, 9.0,  7.6, 14.0, 6.6)    # canal 3D → FEM sub
+    arr(ax, 13.1, 7.6, 18.0, 6.6)    # geodata → soil
+    arr(ax, 17.7, 7.6, 14.1, 6.6)    # D8 thalweg → FEM sub
+    arr(ax, 5.4,  7.6, 5.9,  6.6)    # canal design → CFD
+
+    # ── arrows middle → bottom ────────────────────────────────────────
+    arr(ax, 2.0,  4.5, 3.2,  4.1)    # GRAINnet → hydraulic validation
+    arr(ax, 5.9,  4.5, 4.5,  4.1)    # CFD → hydraulic validation
+    arr(ax, 9.9,  4.5, 9.8,  4.1)    # FEM super → structural dossier
+    arr(ax, 14.1, 4.5, 10.5, 4.1)    # FEM sub → structural dossier
+    arr(ax, 18.1, 4.5, 16.7, 4.1)    # soil → soil map
+    arr(ax, 18.1, 4.5, 13.0, 4.1)    # soil → structural dossier (params)
+
+    # ── GRAINnet ↔ soil (shared grain info) ──────────────────────────
+    ax.annotate("", xy=(3.75, 5.5), xytext=(3.55, 5.5),
+                arrowprops=dict(arrowstyle="<->", color="#20c0b0", lw=1.2),
+                zorder=5)
+
+    # ── legend ────────────────────────────────────────────────────────
+    handles = [
+        mpatches.Patch(fc=C["existing"], ec=C["border_e"],  label="Existing pipeline"),
+        mpatches.Patch(fc=C["grain"],    ec=C["border_g"],  label="GRAINnet — grain size → n"),
+        mpatches.Patch(fc=C["cfd"],      ec=C["border_c"],  label="JAX fluid solver"),
+        mpatches.Patch(fc=C["fem_sup"],  ec=C["border_fs"], label="JAX FEM — lining (IS 456/3370)"),
+        mpatches.Patch(fc=C["fem_sub"],  ec=C["border_fb"], label="JAX FEM — foundation (IS 6403/8009)"),
+        mpatches.Patch(fc=C["soil"],     ec=C["border_s"],  label="Surface → soil composition"),
     ]
-    ax.legend(handles=legend_handles, loc="lower right", fontsize=8,
-              facecolor="#1a1a2a", edgecolor="#3a3a4a", labelcolor="#e0e0e0",
-              ncol=4, bbox_to_anchor=(1.0, -0.01))
+    ax.legend(handles=handles, loc="lower center", fontsize=8,
+              facecolor="#1a1a2a", edgecolor="#3a3a4a",
+              labelcolor="#e0e0e0", ncol=6,
+              bbox_to_anchor=(0.5, -0.01))
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150, bbox_inches="tight",
                 facecolor=fig.get_facecolor())
     plt.close(fig)
-    print(f"  Future roadmap figure → {out_path}")
+    print(f"  Future roadmap → {out_path}")
 
 
 if __name__ == "__main__":

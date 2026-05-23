@@ -359,63 +359,137 @@ Weights: [github.com/1kaiser/d_jax/releases](https://github.com/1kaiser/d_jax/re
 
 ![Future roadmap](assets/future_roadmap.png)
 
-*How the existing pipeline outputs (blue) feed the three planned extensions: JAX water simulation (green), JAX FEM structural design (orange), and surface-material → soil-composition classification (purple).*
+*How the existing pipeline outputs (blue) feed five planned extensions: GRAINnet grain-size inference (teal), JAX fluid solver for superstructure flow stability (green), JAX FEM for superstructure lining design (orange), sub-structure foundation design (red-orange), and surface-material → subsurface soil composition (purple).*
 
 ---
 
-### JAX Water Simulation
+### GRAINnet — Bed Grain Size → Manning's n
 
-The computed flow depth raster and canal geometry can feed directly into a JAX-based shallow-water or Saint-Venant solver for transient flood routing and canal capacity validation.
+Manning's roughness coefficient n is not a fixed lookup value — it is a direct function of the bed material gradation. The Strickler formula (for gravel/cobble beds) gives:
 
 ```
-flow_depth.tif  ──► JAX CFD / Saint-Venant solver
-canal_model.step ──► mesh boundary conditions
-                        │
-                        ▼
-                 Q_sim(t) ≈ Q_target?   [validate design]
-                 flood extent raster    [compare with Ortho]
+n = d90^(1/6) / K_s       K_s ≈ 21–26 m^(1/3)/s  (gravel bed, Bathurst 1985)
 ```
 
-Candidate library: [`google/jax-cfd`](https://github.com/google/jax-cfd) or the in-repo `web/jax-js-fem/` TypeScript FEM prototype.
+[`1kaiser/GRAINnet`](https://github.com/1kaiser/GRAINnet) infers the grain-size distribution (d50, d84, d90) directly from a river-bed image using deep learning, without field sieving.
+
+```
+Ortho.tif  ──► GRAINnet inference
+                    │
+                    ▼
+             d50(X,Y), d84(X,Y), d90(X,Y)   [mm, spatially distributed]
+                    │
+         Strickler / Hey (1979) ─────────────┤
+         n(X,Y) = d90(X,Y)^(1/6) / K_s      │
+                                             ▼
+                              Spatially variable Manning's n
+                                             │
+                    ┌────────────────────────┴──────────────────┐
+                    │  Re-solve Manning Q with n(X,Y)           │
+                    │  Q = (1/n)·A·R^(2/3)·√S                  │
+                    │  → more accurate discharge estimate       │
+                    │  → IS 10430 n=0.018 assumption validated  │
+                    └───────────────────────────────────────────┘
+```
+
+**Why this matters:** The current pipeline uses a fixed n = 0.018 (IS 10430, concrete lining). The Brague at flood stage is a gravel-cobble bed (GW/GP class); d90 ≈ 50–150 mm gives n ≈ 0.025–0.040. A 40–100% change in n shifts Q by the same factor. GRAINnet removes the need for manual particle sampling at every cross-section and enables spatially varying roughness maps.
 
 ---
 
-### JAX FEM — Structural Requirements
+### JAX Fluid Solver — Superstructure Flow Stability
 
-Once the canal section geometry and soil loading are known, a JAX finite-element solver can compute lining stresses, required reinforcement, and foundation bearing capacity — closing the full design loop from hydraulics to structural code compliance.
+The D8 thalweg analysis already shows the Brague reach has a terrain slope of ~1:55 — well into the **supercritical flow** regime for any reasonable canal geometry. The JAX-based shallow-water solver closes the loop between the measured terrain and the designed section's hydraulic stability.
 
 ```
-canal_section.step  ──► JAX FEM mesh
-soil_params(x,y)    ──► boundary loads
-IS 456 / IS 3370    ──► concrete design checks
-                        │
-                        ▼
-                 Steel schedule, slab thickness,
-                 settlement estimate
+flow_depth.tif  ──► D8 thalweg  ──► S_long = 1:55 (measured)
+canal_section   ──► Froude number Fr = V/√(g·D)
+                         │
+                    Fr > 1?  ──► supercritical: hydraulic jump, standing waves
+                         │
+                    JAX-CFD / Saint-Venant 2D
+                    (google/jax-cfd or web/jax-js-fem)
+                         │
+                         ▼
+              Q_sim(t) vs Q_target          [capacity validation]
+              hydraulic jump location X_j   [where to place stilling basin]
+              flow depth envelope h(x,t)    [overtopping check]
+              energy grade line EGL(x)      [drop structure spacing]
 ```
 
-Integration point: [`jax-fem`](https://github.com/tianjuxue/jax-fem) project.
+For the Brague (S=1:55, Q=50 m³/s): drop structures must dissipate ~0.9 m of head per metre of channel — the fluid solver determines how many drops, their spacing, and whether the downstream section re-enters subcritical flow before the next structure.
 
 ---
 
-### Surface Material → Subsurface Soil Composition
+### JAX FEM — Superstructure Lining Design (IS 456 / IS 3370)
 
-Event-day imagery captures the material exposed at the bed — cobbles, sand, concrete, vegetation. Object classification on the ortho frames can map surface texture to geotechnical soil class, giving a coarse 1 m depth profile without borehole data.
+Once the flow regime is known (hydrostatic + dynamic pressure, uplift during emptying), a JAX FEM solver computes the stress state in the concrete lining:
+
+```
+canal_section.step  ──► JAX FEM mesh (shell elements)
+hydrostatic load        ──► p = ρ·g·h at each node
+earth pressure (Ka)     ──► lateral soil thrust on walls
+temperature gradient    ──► thermal shrinkage / expansion
+IS 456:2000             ──► limit-state design: M_u, V_u, N_u
+IS 3370:2009            ──► liquid-retaining: crack width ≤ 0.2 mm
+                                │
+                                ▼
+                     Steel schedule (mm²/m)
+                     Slab / wall thickness
+                     Joint spacing (thermal)
+```
+
+Integration point: [`tianjuxue/jax-fem`](https://github.com/tianjuxue/jax-fem).
+
+---
+
+### JAX FEM — Sub-structure Foundation Design (IS 6403 / IS 8009)
+
+The **sub-structure** (cut-off wall, apron, raft foundation, side-slope toe) sits below the canal invert and must resist seepage, scour, and bearing failure. The 1 m depth soil composition from GRAINnet / surface-material classification provides the input parameters without borehole data.
+
+```
+GRAINnet  d50(X,Y) ──► soil_class(X,Y): GW · SW · CL …
+Surface → USCS class ──► φ (friction angle), c (cohesion), γ (unit weight)
+D8 thalweg depth     ──► scour depth estimate (Lacey / Neill formula)
+                                │
+                    ┌───────────┴────────────────────────────────┐
+                    │  JAX FEM sub-structure mesh                │
+                    │  Bearing capacity:  q_ult = c·Nc + γ·D·Nq  │
+                    │  Settlement:        δ from Boussinesq       │
+                    │  Seepage uplift:    u = γ_w · h_w           │
+                    │  Scour protection:  apron length (IS 8237)  │
+                    │  IS 6403:1981       safe bearing capacity   │
+                    │  IS 8009:1976       settlement calculation  │
+                    └────────────────────────────────────────────┘
+                                │
+                                ▼
+                     Foundation depth D_f (m)
+                     Raft / strip footing dimensions
+                     Cut-off wall depth (anti-seepage)
+                     Toe protection apron length
+```
+
+---
+
+### Surface Material → Subsurface Soil Composition (0–1 m)
+
+Event-day imagery captures the material exposed at the bed. Object classification on the ortho frames maps surface texture to USCS geotechnical class, giving a coarse 1 m depth profile without borehole data. This feeds both the GRAINnet grain-size path (for Manning's n) and the sub-structure design path (for bearing capacity).
 
 ```
 Ortho.tif  ──► SegNet / DINO features  ──► surface class map
                                                │
-                      USCS / IS 1498 ──────────┤
-                      texture→class lookup     │
+                      USCS / IS 1498 ──────────┤  texture → soil class
+                      GRAINnet d50   ──────────┤  grain size → USCS GW/SW/CL
                                                ▼
-                              soil_class(X,Y)  ──► bearing capacity
-                              composition(0–1 m)  ──► permeability
+                              soil_class(X,Y)  ──► φ, c, γ, k (permeability)
+                              composition(0–1 m)  ──► Boussinesq settlement
                                                │
-                                               ▼
-                              FEM soil params  ──► foundation design
+                               ┌───────────────┴──────────────┐
+                               │  Sub-structure  (JAX FEM)    │
+                               │  q_ult, D_f, δ_settle        │
+                               └──────────────────────────────┘
 ```
 
-The connection: bed material visible in high-resolution ortho (2.4 mm/px) correlates with the composition of the substrate to ~1 m depth via standard geotechnical look-up tables (e.g. gravel cobble → GW/GP, sandy gravel → SW/SP). This removes the need for manual soil sampling at every cross-section.
+**Connection chain:** bed surface texture (GW/GP cobble gravel) → Strickler n → hydraulic design → hydrostatic load → superstructure lining FEM → sub-structure foundation FEM → IS 6403 safe bearing capacity. One image, full design dossier.
 
 ---
 
