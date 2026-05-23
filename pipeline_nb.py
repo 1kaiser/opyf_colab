@@ -70,6 +70,27 @@ if SKIP_DEPTH and flow_tif.exists() and meta_path.exists():
         meta = json.load(f)
     print("Depth pipeline skipped — loaded", meta_path)
     print(f"  h_mean={meta['h_final_mean']:.3f} m   h_max={meta['h_final_max']:.3f} m")
+
+    # generate frame_sample + flow_depth_result from cached tifs
+    import shutil, numpy as np, rasterio as _rio
+    frames_dir = Path(OUT_DIR) / "frames"
+    existing = sorted(frames_dir.glob("*.png")) if frames_dir.exists() else []
+    if existing:
+        Path(ASSETS_DIR).mkdir(parents=True, exist_ok=True)
+        shutil.copy(existing[0], Path(ASSETS_DIR) / "frame_sample.png")
+        print("  frame_sample →", Path(ASSETS_DIR) / "frame_sample.png")
+
+    from pipeline import _save_flow_depth_result
+    from modules.depth_to_elevation import load_mnt, rasterise_mnt
+    z_surf_tifs = sorted(Path(OUT_DIR).glob("*_z_surface.tif"))
+    if flow_tif.exists() and z_surf_tifs:
+        with _rio.open(ORTHO_TIF) as src:
+            _tf = src.transform; _sh = (src.height, src.width)
+        with _rio.open(flow_tif) as src:
+            h_arr = src.read(1).astype(np.float32)
+        Xm, Ym, Zm = load_mnt(MNT_XYZ, subsample=5)
+        zb = rasterise_mnt(Xm, Ym, Zm, _tf, _sh)
+        _save_flow_depth_result(h_arr, zb, _sh, Path(ASSETS_DIR))
 else:
     args = types.SimpleNamespace(
         video=VIDEO_DOWN, mnt=MNT_XYZ, ortho=ORTHO_TIF,

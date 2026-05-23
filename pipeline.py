@@ -139,7 +139,7 @@ def run_depth_pipeline(args) -> dict:
         import shutil
         assets_path = REPO / args.assets
         assets_path.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(frames[0], assets_path / "frame_sample.png")
+        shutil.copy(frames[0], assets_path / "frame_sample.png")
         print(f"  Frame sample → {assets_path / 'frame_sample.png'}")
 
     # Stage 2 – model
@@ -692,12 +692,12 @@ def run_visualisation(assets_dir: Path):
     except Exception as exc:
         print(f"  [WARN] future_roadmap failed: {exc}")
 
-    # multiview_comparison.png — copy from output/brague if it exists there
+    # multiview_comparison.png — always refresh from output/brague/
     import shutil
     src = REPO / "output" / "brague" / "multiview_comparison.png"
     dst = assets_dir / "multiview_comparison.png"
-    if src.exists() and not dst.exists():
-        shutil.copy2(src, dst)
+    if src.exists():
+        shutil.copy(src, dst)
         print(f"  multiview_comparison → {dst}")
 
 
@@ -760,8 +760,31 @@ def main():
         with open(meta_path) as f:
             meta = json.load(f)
         print(f"  Loaded meta: {meta_path}")
-        # Still need z_bed + transform for alignment stage
         _z_bed = _transform = _X_mnt = _Y_mnt = _Z_mnt = None
+
+        # ── generate frame_sample.png + flow_depth_result.png from cache ──
+        import numpy as np, rasterio as _rio
+        frames_dir = out_dir / "frames"
+        existing_frames = sorted(frames_dir.glob("*.png")) if frames_dir.exists() else []
+        if existing_frames:
+            import shutil
+            assets.mkdir(parents=True, exist_ok=True)
+            shutil.copy(existing_frames[0], assets / "frame_sample.png")
+            print(f"  frame_sample  → {assets / 'frame_sample.png'}")
+
+        if flow_tif.exists():
+            z_surface_tifs = sorted(out_dir.glob("*_z_surface.tif"))
+            if z_surface_tifs:
+                with _rio.open(flow_tif) as src:
+                    h_arr = src.read(1).astype(np.float32)
+                with _rio.open(args.ortho) as src:
+                    _transform = src.transform
+                    _ortho_shape = (src.height, src.width)
+                from modules.depth_to_elevation import load_mnt, rasterise_mnt
+                _X_mnt, _Y_mnt, _Z_mnt = load_mnt(args.mnt, subsample=5)
+                _z_bed = rasterise_mnt(_X_mnt, _Y_mnt, _Z_mnt,
+                                       _transform, _ortho_shape)
+                _save_flow_depth_result(h_arr, _z_bed, _ortho_shape, assets)
     else:
         check_file(Path(args.video),   "Video")
         check_file(Path(args.mnt),     "MNT")
