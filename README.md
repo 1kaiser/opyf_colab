@@ -1,6 +1,6 @@
 # 🌊 opyf_colab
 
-**[🚀 Open In Colab](https://colab.research.google.com/github/1kaiser/opyf_colab/blob/main/jax_3d_reconstruction_colab.ipynb)**
+**[🚀 Open Pipeline Notebook](https://github.com/1kaiser/opyf_colab/blob/main/pipeline_notebook.ipynb)**  |  **[🚀 Open In Colab](https://colab.research.google.com/github/1kaiser/opyf_colab/blob/main/jax_3d_reconstruction_colab.ipynb)**
 
 > **Event-day video → metric flow depth → discharge → D8 thalweg (slope/curvature) → IS-code canal design → 3D model.**  
 > Built on JAX · Depth Pro · LightGlue · FreeCAD.
@@ -17,6 +17,8 @@
 ```
 opyf_colab/
 ├── pipeline.py              ← single entry-point
+├── make_notebook.py         ← generates pipeline_notebook.ipynb
+├── pipeline_notebook.ipynb  ← Jupyter / Papermill notebook
 │
 ├── modules/
 │   ├── depth_to_elevation.py
@@ -25,7 +27,10 @@ opyf_colab/
 │   ├── canal_cad.py
 │   ├── d8_thalweg.py        ← JAX D8 flow routing
 │   ├── extract_reach_geometry.py
-│   ├── canal_3d_viz.py
+│   ├── canal_3d_viz.py      ← 3D overlay + 4-view CAD
+│   ├── jax_lspiv.py         ← JAX LSPIV discharge
+│   ├── lspiv_viz.py         ← LSPIV visualisation
+│   ├── pointcloud_ortho_check.py
 │   ├── infer_depth.py
 │   ├── infer_features.py
 │   ├── infer_stereo.py
@@ -59,16 +64,22 @@ Stage 6a ─ Aggregate → flow_depth.tif
            h(x,y) = Z_surface − Z_bed
            ↓
 Stage 6b ─ LightGlue bank matching
-           → homography H
-           → GCP scale solve (s, t)
            → water volume (m³)
            ↓
-Stage 7  ─ Manning + IS codes
-           → B, D, side slope
-           → FreeCAD 3D model
+Stage 6c ─ JAX D8 thalweg
+           → slope, curvature
            ↓
-Stage 7b ─ JAX D8 thalweg
-           → slope, curvature, bearing
+Stage 6d ─ Pointcloud × Ortho check
+           ↓
+Stage 7  ─ Manning + IS 10430
+           → B, D, side slope
+           ↓
+Stage 7b ─ Canal 3D overlay
+Stage 7c ─ 4-view CAD drawing
+           ↓
+Stage 7d ─ JAX LSPIV (IMG_1139 + 1142)
+           → orthorectify → FFT PIV
+           → Q = α∫V·h dl
            ↓
 Stage 8  ─ Annotated visualisation
 ```
@@ -91,10 +102,32 @@ Stage 8  ─ Annotated visualisation
 JAX_PLATFORMS=cpu conda run -n num_gpu python3 pipeline.py
 
 # Fast re-run (skip download + depth inference if outputs exist)
-JAX_PLATFORMS=cpu conda run -n num_gpu python3 pipeline.py --skip-download --skip-depth --skip-canal
+JAX_PLATFORMS=cpu conda run -n num_gpu python3 pipeline.py \
+  --skip-download --skip-depth --skip-align \
+  --skip-d8 --skip-pc-check \
+  --skip-canal --skip-canal-viz --skip-lspiv --skip-viz
 ```
 
 All outputs land in `output/brague/` and figures in `assets/`.
+
+### 📓 Jupyter / Papermill
+
+```bash
+# Generate the notebook
+conda run -n num_gpu python3 make_notebook.py
+
+# Execute all stages (with cached depth + alignment)
+conda run -n num_gpu papermill pipeline_notebook.ipynb pipeline_notebook.ipynb \
+  -p SKIP_DOWNLOAD True -p SKIP_DEPTH True -p SKIP_ALIGN True
+
+# Override a single parameter — e.g. change number of depth frames
+conda run -n num_gpu papermill pipeline_notebook.ipynb pipeline_notebook.ipynb \
+  -p SKIP_DOWNLOAD True -p N_FRAMES 10
+```
+
+The notebook (`pipeline_notebook.ipynb`) mirrors `pipeline.py` stage-by-stage,
+with inline display of every output figure. Re-run `make_notebook.py` after
+editing `pipeline.py` to keep them in sync.
 
 ---
 
