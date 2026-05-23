@@ -202,8 +202,8 @@ if not SKIP_D8:
     d8_result = run_d8_thalweg(Path(OUT_DIR), Path(ASSETS_DIR))
     if d8_result:
         geo = d8_result["geometry"]
-        print(f"Thalweg length : {geo['length_m']:.1f} m")
-        print(f"Mean bed slope : {geo['slope_mean']:.5f}")
+        print(f"Thalweg length : {geo['reach_length_m']:.1f} m")
+        print(f"Long. slope    : {geo['S_long']:.5f}")
 else:
     print("Stage 6c skipped")
 """))
@@ -477,8 +477,8 @@ print(f"  Flow depth h_mean     = {meta.get('h_final_mean', float('nan')):.3f} m
 print(f"  Flow depth h_max      = {meta.get('h_final_max', float('nan')):.3f} m")
 if d8_result:
     geo = d8_result["geometry"]
-    print(f"  Thalweg length        = {geo['length_m']:.1f} m")
-    print(f"  Mean bed slope        = {geo['slope_mean']:.5f}")
+    print(f"  Thalweg length        = {geo['reach_length_m']:.1f} m")
+    print(f"  Long. slope           = {geo['S_long']:.5f}")
 print(f"  Canal bed width       = {canal_params['bed_width_m']:.3f} m")
 print(f"  Canal water depth     = {canal_params['water_depth_m']:.3f} m")
 print(f"  Canal Q (IS 10430)    = {canal_params['Q_calculated_m3s']:.2f} m³/s")

@@ -125,7 +125,7 @@ def plot_birdeye_frames(
         r = results[key]
         _spine(ax)
 
-        ortho_frames = r.get("ortho_imgs", [])
+        ortho_frames = r.get("ortho_frames", [])
         xg = r.get("x_grid")
         yg = r.get("y_grid")
 

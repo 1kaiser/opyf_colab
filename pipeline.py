@@ -408,9 +408,9 @@ def run_d8_thalweg(out_dir: Path, assets: Path) -> dict | None:
     )
 
     geo = result["geometry"]
-    print(f"  Thalweg length : {geo['length_m']:.1f} m")
-    print(f"  Mean slope     : {geo['slope_mean']:.5f}")
-    print(f"  ΔZ invert      : {geo.get('z_drop_m', 0.0):.3f} m")
+    print(f"  Thalweg length : {geo['reach_length_m']:.1f} m")
+    print(f"  Long. slope    : {geo['S_long']:.5f}")
+    print(f"  Min radius     : {geo.get('min_radius_m', 0.0):.1f} m")
 
     # Quick thalweg plan-view save
     try:
@@ -427,13 +427,13 @@ def run_d8_thalweg(out_dir: Path, assets: Path) -> dict | None:
             np.log1p(acc), origin="upper", cmap="Blues",
             alpha=0.8,
         )
-        cx = result.get("centerline_col_sub", [])
-        cy = result.get("centerline_row_sub", [])
+        cx = result.get("thalweg_cols", [])
+        cy = result.get("thalweg_rows", [])
         if len(cx) > 1:
             ax.plot(cx, cy, "r-", lw=1.5, label="D8 thalweg")
         ax.set_title(
-            f"D8 Thalweg  L={geo['length_m']:.0f} m  "
-            f"slope={geo['slope_mean']:.4f}",
+            f"D8 Thalweg  L={geo['reach_length_m']:.0f} m  "
+            f"S={geo['S_long']:.4f}",
             color="#e8e8e8", fontsize=10,
         )
         ax.legend(fontsize=8, facecolor="#1a1a2a", edgecolor="#3a3a4a",
@@ -624,7 +624,7 @@ def run_lspiv(
         for k in ("X", "Y", "U", "V", "norm"):
             merged[k] = np.concatenate([r1[k], r2[k]])
         merged["Q"] = r1["Q"] + r2["Q"]
-        merged["ortho_imgs"] = r1["ortho_imgs"]
+        merged["ortho_frames"] = r1["ortho_frames"]
         print(f"\n  Combined: {len(merged['X']):,} vectors  "
               f"Q_total = {merged['Q']:.2f} m³/s")
         result_to_plot = merged

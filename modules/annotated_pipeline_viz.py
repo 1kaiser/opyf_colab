@@ -74,6 +74,16 @@ def load_all():
     with open(REPO/"output/brague/pipeline_meta.json") as f: meta = json.load(f)
     with open(REPO/"canal_design/canal_params.json")   as f: cp   = json.load(f)
 
+    # normalise canal_params key names (new optimizer uses _m / _ms suffixes)
+    cp.setdefault("bed_width",           cp.get("bed_width_m", 0))
+    cp.setdefault("water_depth",         cp.get("water_depth_m", 0))
+    cp.setdefault("total_depth",         cp.get("total_depth_m", cp.get("water_depth_m", 0) + cp.get("freeboard_m", 0)))
+    cp.setdefault("velocity",            cp.get("velocity_ms", 0))
+    cp.setdefault("calculated_discharge",cp.get("Q_calculated_m3s", 0))
+    cp.setdefault("is_discharge_target", cp.get("Q_target_m3s", 0))
+    cp.setdefault("freeboard",           cp.get("freeboard_m", 0))
+    cp.setdefault("min_radius",          cp.get("min_curve_radius_m", 1000))
+
     print(f"  rgb={rgb.shape}  zs valid={np.isfinite(zs_c).sum():,}  "
           f"hd valid={np.isfinite(hd_c).sum():,}")
     return dict(rgb=rgb, zs=zs_c, hd=hd_c, mnt=mnt, cx=cx, cy=cy,
