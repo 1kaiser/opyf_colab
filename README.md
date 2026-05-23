@@ -223,7 +223,7 @@ Event frame PNG          Ortho.tif (pre-event, dry)
 *Trapezoidal section — blue = water body, grey = concrete lining (IS 10430), hatched = freeboard.*
 
 <details>
-<summary>🔍 Analytical minimum-cost section formula (Chow 1959 / IS 10430)</summary>
+<summary>🔍 Analytical minimum-cost section formula (Chow 1959 / IS 10430 · Ancey §2.4.5, §5.3)</summary>
 
 For the hydraulically efficient trapezoidal section **R = D/2** yields a closed-form solution:
 
@@ -269,7 +269,7 @@ IS code constraints applied after:
 *Alignment check: wet mask boundary + MNT contours on Ortho (left) · flow depth colourmap (centre) · D8 thalweg + accumulation on Ortho (right).*
 
 <details>
-<summary>🔍 JAX D8 pipeline — fill → directions → accumulation → thalweg</summary>
+<summary>🔍 JAX D8 pipeline — fill → directions → accumulation → thalweg (Ancey §5.1.4, §5.5–5.6)</summary>
 
 ```
 flow_depth.tif  ──► Z_bed = Z_surface − h
@@ -533,5 +533,16 @@ Ortho.tif  ──► SegNet / DINO features  ──► surface class map
 - **opyflow** LSPIV: [groussea/opyflow](https://github.com/groussea/opyflow) — Rousseau (2019)
 - **Brague dataset**: Vigoureux et al., SimHydro 2021
 - **blender-colab skeleton**: [ynshung/blender-colab](https://github.com/ynshung/blender-colab)
+
+---
+
+## 📚 References
+
+| Reference | Relevance to pipeline |
+|---|---|
+| Ancey, C. (2026). *Mécanique des fluides — Introduction à l'hydraulique pour les ingénieurs civils*, v23.3. EPFL ENAC/IIC/LHE. [PDF](https://lhe.epfl.ch/cours/bachelor/cours-meca.pdf) | §2.4.5 Vaschy-Buckingham → Manning-Strickler law · §5.1.4 channel morphology (D8 thalweg) · §5.2–5.3 canal hydraulics + uniform flow · §5.4.2 granulometry → roughness · §5.5 backwater curves · §5.6 hydraulic jump (supercritical S=1:55) |
+| Chow, V.T. (1959). *Open-Channel Hydraulics*. McGraw-Hill. | Analytical minimum-cost section (hydraulically efficient trapezoid, R = D/2) |
+| IS 5968:1987 | Minimum curve radius table by design discharge |
+| IS 10430:2000 | Freeboard, side slopes, velocity limits, Manning n for lined canals |
 
 Created and maintained by [1kaiser](https://github.com/1kaiser)
