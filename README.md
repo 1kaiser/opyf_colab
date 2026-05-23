@@ -237,6 +237,20 @@ IS code constraints applied after:
   └──────────────────────────────────────────────────┘
 ```
 
+**Measurement → discharge → IS design chain:**
+
+![Design chain](assets/design_chain.png)
+
+*Left: flow depth distribution from Stage 6a with h_mean and h_max marked.  
+Centre: Manning's equation components (A, P, R, V, Q) for the optimal section.  
+Right: B–D parameter space — yellow dashed contour = Q target, green = V_min limit, red = V_max limit, red dot = IS-compliant solution.*
+
+**Labeled cross-section:**
+
+![Canal cross-section](assets/canal_section.png)
+
+*Trapezoidal section: blue = water body, grey = concrete lining (IS 10430), hatched = freeboard zone. All IS-code dimensions annotated.*
+
 ---
 
 ### Stage 7 (cont.) — 3D CAD Model via FreeCAD
@@ -305,6 +319,12 @@ Weights: [github.com/1kaiser/d_jax/releases](https://github.com/1kaiser/d_jax/re
 ---
 
 ## Future Roadmap
+
+![Future roadmap](assets/future_roadmap.png)
+
+*How the existing pipeline outputs (blue) feed the three planned extensions: JAX water simulation (green), JAX FEM structural design (orange), and surface-material → soil-composition classification (purple).*
+
+---
 
 ### JAX Water Simulation
 
