@@ -38,20 +38,15 @@ Event-day video          Pre-event ortho + MNT terrain
 ## Quick Start
 
 ```bash
-# Download weights and data to weights/ and data/brague/ (see Release Downloads below)
+# Full pipeline — auto-downloads all assets from the release, then runs
+JAX_PLATFORMS=cpu python3 pipeline.py
 
-# Full pipeline — depth inference + canal design + visualisation
-JAX_PLATFORMS=cpu python3 pipeline.py \
-    --video   tests/Test_Brague_flood/IMG_1139.MOV \
-    --mnt     data/brague/MNT.xyz \
-    --ortho   data/brague/Ortho.tif \
-    --weights weights/depth_pro.msgpack
-
-# Skip depth inference if outputs already exist (fast re-run)
-JAX_PLATFORMS=cpu python3 pipeline.py --skip-depth --skip-canal
+# Skip download if assets already present, skip re-running depth inference
+JAX_PLATFORMS=cpu python3 pipeline.py --skip-download --skip-depth --skip-canal
 ```
 
-`pipeline.py` produces all outputs under `output/brague/` and the annotated figure at `assets/annotated_pipeline.png`.
+`pipeline.py` auto-downloads all release assets (video, weights, MNT, ortho) via wget on first run.  
+All outputs land in `output/brague/` and the annotated figure at `assets/annotated_pipeline.png`.
 
 ---
 
@@ -59,34 +54,39 @@ JAX_PLATFORMS=cpu python3 pipeline.py --skip-depth --skip-canal
 
 ```
 opyf_colab/
-├── pipeline.py                 Single entry-point — runs all stages
-├── modules/                    Importable pipeline components
-│   ├── depth_to_elevation.py   Frames → Z_surface → flow depth raster
-│   ├── canal_optimizer.py      JAX gradient descent → optimal canal section
-│   ├── canal_cad.py            FreeCAD 3D / 2D drawings
-│   ├── reconstruction.py       Kabsch/Umeyama alignment, point cloud utils
-│   ├── visualise_comparison.py Ortho vs depth multi-view comparison
-│   └── annotated_pipeline_viz.py  5-stage annotated figure → assets/
+├── pipeline.py                      Single entry-point — all stages, auto-download
+├── modules/                         All pipeline components
+│   ├── depth_to_elevation.py        Frames → Z_surface → flow depth raster
+│   ├── canal_optimizer.py           JAX optimizer + IS 5968/10430 compliance
+│   ├── canal_cad.py                 FreeCAD 3D sweep + 2D section + reach model
+│   ├── infer_depth.py               Depth Pro CLI wrapper
+│   ├── infer_features.py            SuperPoint + LightGlue + homography
+│   ├── infer_stereo.py              MASt3R dense stereo
+│   ├── infer_video.py               VGGT video geometry
+│   ├── segment_water.py             Water mask: color / diff / SegNet (Flax)
+│   ├── reconstruction.py            Kabsch/Umeyama alignment, point cloud utils
+│   ├── visualise_comparison.py      Ortho vs depth multi-view comparison
+│   └── annotated_pipeline_viz.py    5-stage annotated figure → assets/
 ├── assets/
-│   └── annotated_pipeline.png  Generated visualisation (all pipeline stages)
-├── data/
-│   ├── pinecone_subset/        10 frames for 3D reconstruction testing
-│   └── brague/                 Brague flood event data
-│       ├── MNT.xyz             Pre-event terrain (Lambert-93, 4.9 mm spacing)
-│       └── Ortho.tif           Orthorectified aerial image (2.4 mm/px, EPSG:2154)
-├── canal_design/               Legacy stand-alone canal scripts + canal_params.json
-├── pipelines/                  Legacy stand-alone pipeline scripts
-├── inference/                  Stand-alone single-model inference scripts
-├── models/jax/                 JAX model implementations
-│   ├── jax_depth_pro/
-│   ├── jax_lightglue/
-│   ├── jax_mast3r/
-│   ├── jax_reconstruction/
-│   └── jax_vggt/
-└── tests/Test_Brague_flood/
-    ├── IMG_1139.MOV            Flood video — downstream bridge (22 MB)
-    ├── IMG_1142.MOV            Flood video — upstream bridge (12 MB)
-    └── Brague_Flood_LSPIV.ipynb
+│   └── annotated_pipeline.png       Generated pipeline figure
+├── data/brague/
+│   ├── MNT.xyz                      Pre-event terrain (auto-downloaded)
+│   ├── Ortho.tif                    Orthorectified aerial image (auto-downloaded)
+│   └── dxf_data.json                Cross-section survey data
+├── canal_design/
+│   └── canal_params.json            IS-compliant canal dimensions (optimizer output)
+├── models/jax/                      JAX model implementations
+│   ├── jax_depth_pro/               Depth Pro (ViT + decoder)
+│   ├── jax_lightglue/               SuperPoint + LightGlue
+│   ├── jax_mast3r/                  MASt3R dense stereo
+│   ├── jax_reconstruction/          Geometry utils
+│   └── jax_vggt/                    VGGT video geometry
+├── tests/Test_Brague_flood/
+│   ├── IMG_1139.MOV                 Flood video downstream (auto-downloaded)
+│   ├── IMG_1142.MOV                 Flood video upstream (auto-downloaded)
+│   └── Brague_Flood_LSPIV.ipynb
+├── pipelines/                       Legacy stand-alone scripts (kept for reference)
+└── web/jax-js-fem/                  TypeScript JAX-in-browser canal optimizer
 ```
 
 ---
@@ -100,8 +100,10 @@ opyf_colab/
 | [`Ortho.tif`](https://github.com/1kaiser/opyf_colab/releases/download/v1.0.0/Ortho.tif) | 564 MB | Orthorectified GeoTIFF — 15228×13222 px |
 | [`superpoint_lightglue.msgpack`](https://github.com/1kaiser/opyf_colab/releases/download/v1.0.0/superpoint_lightglue.msgpack) | 46 MB | LightGlue JAX weights |
 | [`superpoint.msgpack`](https://github.com/1kaiser/opyf_colab/releases/download/v1.0.0/superpoint.msgpack) | 5 MB | SuperPoint JAX weights |
+| [`IMG_1139.MOV`](https://github.com/1kaiser/opyf_colab/releases/download/v1.0.0/IMG_1139.MOV) | 23 MB | Flood video — downstream bridge |
+| [`IMG_1142.MOV`](https://github.com/1kaiser/opyf_colab/releases/download/v1.0.0/IMG_1142.MOV) | 13 MB | Flood video — upstream bridge |
 
-Download to `weights/` and `data/brague/` before running the pipeline.
+`pipeline.py` downloads all missing assets automatically on first run via wget.
 
 ---
 

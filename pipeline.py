@@ -3,6 +3,7 @@ pipeline.py — single entry-point for the opyf_colab hydraulic analysis pipelin
 
 Stages
 ------
+0. Download release assets (video, weights, ortho, MNT) if missing
 1. Extract frames from event video
 2. Load Depth Pro weights
 3. Load ortho + dry mask
@@ -18,27 +19,41 @@ Usage
 
 Options
 -------
---video   PATH   Event-day video (default: tests/Test_Brague_flood/IMG_1139.MOV)
---mnt     PATH   MNT .xyz point cloud (default: data/brague/MNT.xyz)
---ortho   PATH   Orthorectified GeoTIFF (default: data/brague/Ortho.tif)
---weights PATH   Depth Pro .msgpack weights (default: weights/depth_pro.msgpack)
---out-dir PATH   Intermediate outputs directory (default: output/brague)
---assets  PATH   Final assets directory (default: assets)
---n-frames N     Number of frames to sample (default: 5)
---skip-depth     Skip depth inference if output/brague/flow_depth.tif already exists
---skip-canal     Skip canal optimisation if canal_design/canal_params.json exists
---skip-viz       Skip visualisation step
+--video      PATH  Event-day video (default: tests/Test_Brague_flood/IMG_1139.MOV)
+--mnt        PATH  MNT .xyz point cloud (default: data/brague/MNT.xyz)
+--ortho      PATH  Orthorectified GeoTIFF (default: data/brague/Ortho.tif)
+--weights    PATH  Depth Pro .msgpack weights (default: weights/depth_pro.msgpack)
+--out-dir    PATH  Intermediate outputs directory (default: output/brague)
+--assets     PATH  Final assets directory (default: assets)
+--n-frames   N     Number of frames to sample (default: 5)
+--skip-download    Skip automatic asset download
+--skip-depth       Skip depth inference if output/brague/flow_depth.tif exists
+--skip-canal       Skip canal optimisation if canal_design/canal_params.json exists
+--skip-viz         Skip visualisation step
 """
 
 import argparse
 import json
 import os
-import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
 
 REPO = Path(__file__).parent
+
+_RELEASE_BASE = "https://github.com/1kaiser/opyf_colab/releases/download/v1.0.0"
+
+# All assets that can be auto-downloaded, mapped to their local paths
+_RELEASE_ASSETS = {
+    "depth_pro.msgpack":            "weights/depth_pro.msgpack",
+    "superpoint.msgpack":           "weights/superpoint.msgpack",
+    "superpoint_lightglue.msgpack": "weights/superpoint_lightglue.msgpack",
+    "MNT.xyz":                      "data/brague/MNT.xyz",
+    "Ortho.tif":                    "data/brague/Ortho.tif",
+    "IMG_1139.MOV":                 "tests/Test_Brague_flood/IMG_1139.MOV",
+    "IMG_1142.MOV":                 "tests/Test_Brague_flood/IMG_1142.MOV",
+}
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +68,38 @@ def check_file(path: Path, label: str):
         print(f"  [ERROR] {label} not found: {path}")
         sys.exit(1)
     print(f"  {label}: {path}")
+
+
+# ── stage 0: asset download ───────────────────────────────────────────────────
+
+def download_assets(required_only: list[str] | None = None):
+    """Download missing release assets via wget. Only downloads if file absent."""
+    banner("STAGE 0: Download release assets")
+    any_downloaded = False
+
+    for filename, local_rel in _RELEASE_ASSETS.items():
+        local = REPO / local_rel
+        if required_only and local_rel not in required_only:
+            continue
+        if local.exists():
+            print(f"  ✓ {local_rel}")
+            continue
+
+        url = f"{_RELEASE_BASE}/{filename}"
+        local.parent.mkdir(parents=True, exist_ok=True)
+        print(f"  Downloading {filename} ({url}) …")
+        result = subprocess.run(
+            ["wget", "--continue", "--quiet", "--show-progress", "-O", str(local), url],
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"  [WARN] wget failed for {filename} — check URL or download manually")
+        else:
+            print(f"  → {local}")
+            any_downloaded = True
+
+    if not any_downloaded:
+        print("  All assets already present.")
 
 
 # ── stage 1-6: depth pipeline ────────────────────────────────────────────────
@@ -210,18 +257,20 @@ def run_visualisation(assets_dir: Path):
 def parse_args():
     p = argparse.ArgumentParser(
         description="opyf_colab hydraulic pipeline — frames to flow depth to canal design")
-    p.add_argument("--video",    default="tests/Test_Brague_flood/IMG_1139.MOV")
-    p.add_argument("--mnt",      default="data/brague/MNT.xyz")
-    p.add_argument("--ortho",    default="data/brague/Ortho.tif")
-    p.add_argument("--weights",  default="weights/depth_pro.msgpack")
-    p.add_argument("--out-dir",  default="output/brague")
-    p.add_argument("--assets",   default="assets")
-    p.add_argument("--n-frames", type=int, default=5)
-    p.add_argument("--skip-depth",  action="store_true",
+    p.add_argument("--video",         default="tests/Test_Brague_flood/IMG_1139.MOV")
+    p.add_argument("--mnt",           default="data/brague/MNT.xyz")
+    p.add_argument("--ortho",         default="data/brague/Ortho.tif")
+    p.add_argument("--weights",       default="weights/depth_pro.msgpack")
+    p.add_argument("--out-dir",       default="output/brague")
+    p.add_argument("--assets",        default="assets")
+    p.add_argument("--n-frames",      type=int, default=5)
+    p.add_argument("--skip-download", action="store_true",
+                   help="Skip automatic release asset download")
+    p.add_argument("--skip-depth",    action="store_true",
                    help="Skip depth inference if flow_depth.tif already exists")
-    p.add_argument("--skip-canal",  action="store_true",
+    p.add_argument("--skip-canal",    action="store_true",
                    help="Skip canal optimisation if canal_params.json already exists")
-    p.add_argument("--skip-viz",    action="store_true",
+    p.add_argument("--skip-viz",      action="store_true",
                    help="Skip visualisation step")
     return p.parse_args()
 
@@ -235,6 +284,12 @@ def main():
     canal_dir = REPO / "canal_design"
 
     t_total = time.time()
+
+    # ── stage 0: asset download ─────────────────────────────────────────────
+    if not args.skip_download:
+        download_assets()
+    else:
+        banner("STAGE 0: Download (SKIPPED)")
 
     # ── depth pipeline ──────────────────────────────────────────────────────
     meta_path = out_dir / "pipeline_meta.json"
