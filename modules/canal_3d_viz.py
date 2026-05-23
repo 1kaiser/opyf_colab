@@ -111,6 +111,7 @@ def generate_canal_3d_overlay(
     reach_geo:      dict,
     out_path:       str = "assets/canal_3d_overlay.png",
     sub:            int = 6,
+    d8_result:      dict | None = None,
 ):
     """
     Parameters
@@ -121,6 +122,9 @@ def generate_canal_3d_overlay(
     canal_params   : dict  output of optimise_canal()
     reach_geo      : dict  output of extract_reach()
     sub            : int   spatial subsampling factor
+    d8_result      : dict  optional output of extract_d8_thalweg() — when
+                           provided, the D8 thalweg + accumulation are used for
+                           the curvature panel and the plan-view overlay
     """
     import matplotlib.pyplot as plt
     import matplotlib.colors as mcolors
@@ -183,10 +187,24 @@ def generate_canal_3d_overlay(
     z_invert_prof  = z_prof - 0.0   # bed = terrain (canal placed at surface level)
     S_design       = canal_params.get("long_slope", S_long_meas)
 
-    from modules.extract_reach_geometry import curvature_profile
-    kappa   = curvature_profile(cx, cy)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        R_curve = np.where(kappa > 1e-9, 1.0 / kappa, np.inf)
+    # ── curvature: prefer D8 thalweg geometry if available ────────────
+    if d8_result is not None:
+        geo_d8 = d8_result["geometry"]
+        cx_curv = d8_result["centerline_x"]
+        cy_curv = d8_result["centerline_y"]
+        R_curve = geo_d8["radius_m"]
+        dist_curv = geo_d8["dist_m"]
+        S_long_meas = geo_d8["S_long"]
+    else:
+        from modules.extract_reach_geometry import curvature_profile
+        kappa   = curvature_profile(cx, cy)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            R_curve = np.where(kappa > 1e-9, 1.0 / kappa, np.inf)
+        dist_curv = np.concatenate([[0.0], np.cumsum(
+            np.sqrt(np.diff(cx)**2 + np.diff(cy)**2))])
+        cx_curv, cy_curv = cx, cy
+        S_long_meas = 0.0002   # fallback
+
     R_min   = float(np.nanmin(R_curve[np.isfinite(R_curve)])) if np.any(np.isfinite(R_curve)) else np.inf
     R_IS    = canal_params.get("min_curve_radius_m", 1000.0)
 
@@ -278,21 +296,34 @@ def generate_canal_3d_overlay(
     ax2d.plot(np.concatenate([lx, rx[::-1], [lx[0]]]),
               np.concatenate([ly, ry[::-1], [ly[0]]]),
               color="#f0c040", lw=1.5)
+    # D8 flow accumulation heatmap in plan view
+    if d8_result is not None:
+        acc_sub = d8_result["acc_np"]
+        wet_sub = d8_result["wet_np"]
+        t_sub   = d8_result["transform_sub"]
+        r_sub   = d8_result["res_m"]
+        H_s, W_s = acc_sub.shape
+        xs_d8 = float(t_sub.c) + (np.arange(W_s) + 0.5) * r_sub
+        ys_d8 = float(t_sub.f) - (np.arange(H_s) + 0.5) * r_sub
+        acc_show = np.where(wet_sub, np.log1p(acc_sub), np.nan)
+        ax2d.pcolormesh(xs_d8, ys_d8, acc_show,
+                        cmap="Blues", alpha=0.55, zorder=2,
+                        shading="nearest")
+
     # colour the centreline by curvature radius (clipped to [R_IS/4, 10*R_IS])
     from matplotlib.collections import LineCollection
     import matplotlib.colors as mc2
     R_clamp = np.clip(R_curve, R_IS / 4, R_IS * 4)
     R_clamp[~np.isfinite(R_clamp)] = R_IS * 4
-    seg_pts = np.array([cx, cy]).T.reshape(-1, 1, 2)
+    seg_pts = np.array([cx_curv, cy_curv]).T.reshape(-1, 1, 2)
     segs    = np.concatenate([seg_pts[:-1], seg_pts[1:]], axis=1)
     norm_c  = mc2.Normalize(vmin=R_IS / 4, vmax=R_IS * 4)
     lc = LineCollection(segs, cmap="RdYlGn",
-                        norm=norm_c, linewidth=2.5, zorder=4)
+                        norm=norm_c, linewidth=2.5, zorder=5)
     lc.set_array((R_clamp[:-1] + R_clamp[1:]) / 2)
     ax2d.add_collection(lc)
     plt.colorbar(lc, ax=ax2d, orientation="vertical", fraction=0.03, pad=0.02,
                  label="Radius of curvature (m)")
-    ax2d.axhline(0, color="none")  # dummy for colorbar to register
 
     # IS 5968 radius label
     ax2d.plot([], [], color="#ff4040", lw=2, ls="--",
@@ -322,8 +353,7 @@ def generate_canal_3d_overlay(
     axK = fig.add_subplot(gs[0, 2])
     axK.set_facecolor("#161b22")
 
-    dist_cl = np.concatenate([[0.0], np.cumsum(
-        np.sqrt(np.diff(cx)**2 + np.diff(cy)**2))])
+    dist_cl = dist_curv
 
     R_plot = np.where(np.isfinite(R_curve), R_curve, R_IS * 8)
     R_plot = np.clip(R_plot, 0, R_IS * 6)
@@ -491,22 +521,34 @@ def generate_canal_3d_overlay(
 
 
 if __name__ == "__main__":
-    import json, sys
+    import json, sys, os
     sys.path.insert(0, ".")
     from modules.canal_optimizer import optimise_canal
     from modules.extract_reach_geometry import extract_reach
+    from modules.d8_thalweg import extract_d8_thalweg
 
-    geo = extract_reach("output/brague/flow_depth.tif")
+    FP  = "output/brague/flow_depth.tif"
+    ZSF = "output/brague/frame_00200_z_surface.tif"
+
+    geo = extract_reach(FP)
     geo["h_mean"] = 1.152
 
-    params = optimise_canal(Q_target=50.0, S_long=0.0002)
+    # D8 thalweg for informed slope + curvature
+    d8 = extract_d8_thalweg(FP, ZSF, sub=10)
+    S_meas = max(d8["geometry"]["S_long"], 1e-5)
+    params = optimise_canal(Q_target=50.0, S_long=S_meas)
+
+    print(f"\nDesign with measured S={S_meas:.5f} (1:{int(1/S_meas)}):")
+    print(f"  B={params['bed_width_m']:.2f} m  D={params['water_depth_m']:.2f} m  "
+          f"V={params['velocity_ms']:.2f} m/s")
 
     generate_canal_3d_overlay(
-        flow_depth_tif = "output/brague/flow_depth.tif",
-        z_surface_tif  = "output/brague/frame_00200_z_surface.tif",
+        flow_depth_tif = FP,
+        z_surface_tif  = ZSF,
         ortho_tif      = "data/brague/Ortho.tif",
         canal_params   = params,
         reach_geo      = geo,
         out_path       = "assets/canal_3d_overlay.png",
         sub            = 6,
+        d8_result      = d8,
     )
