@@ -12,6 +12,7 @@ htmlcov/
 
 # Data & Outputs
 output/
+!assets/
 weights/
 *.npy
 *.zip
