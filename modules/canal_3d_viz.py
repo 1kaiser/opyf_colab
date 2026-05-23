@@ -520,6 +520,251 @@ def generate_canal_3d_overlay(
     print(f"  Canal 3D overlay → {out_path}")
 
 
+def generate_canal_cad_figure(
+    canal_params: dict,
+    reach_geo:    dict,
+    out_path:     str = "assets/canal_cad_model.png",
+    n_stations:   int = 40,
+):
+    """
+    Standalone 3-panel CAD model figure for Stage 7c.
+
+    Panel 1 (large, 3D) — isometric view of the canal section extruded along
+                           the centreline: bed, walls, water surface, freeboard
+    Panel 2 (top-right)  — annotated 2D cross-section with key dimensions
+    Panel 3 (bot-right)  — plan view showing canal footprint on the reach
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import matplotlib.gridspec as mgridspec
+    from matplotlib.patches import FancyArrowPatch
+    from mpl_toolkits.mplot3d import Axes3D
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    B   = canal_params["bed_width_m"]
+    D   = canal_params["water_depth_m"]
+    m   = canal_params["side_slope"]
+    fb  = canal_params["freeboard_m"]
+    Q   = canal_params.get("Q_calculated_m3s", 50.0)
+    V   = canal_params.get("velocity_ms", 1.3)
+    n   = canal_params.get("manning_n", 0.018)
+    S   = canal_params.get("long_slope", 1 / 55)
+    Tw  = canal_params.get("top_width_m", B + 2 * m * (D + fb))
+
+    cx  = reach_geo["centerline_x"]
+    cy  = reach_geo["centerline_y"]
+    L   = reach_geo["reach_length_m"]
+
+    # ── derive mean Z_bed elevation (flat canal for display) ─────────
+    z0  = 1011.5   # approximate mean bed elevation (Brague reach)
+
+    # ── section profile (offset from centreline, elevation) ─────────
+    total_h = D + fb
+    sec_w = np.array([-(B/2 + m*total_h), -(B/2 + m*D), -B/2,
+                       B/2, B/2 + m*D,  B/2 + m*total_h])
+    sec_z = np.array([z0 + total_h, z0 + D, z0,
+                       z0,           z0 + D, z0 + total_h])
+    water_w = np.array([-(B/2 + m*D), -B/2, B/2, B/2 + m*D])
+    water_z = np.array([z0 + D,        z0,   z0,  z0 + D])
+
+    # pick evenly-spaced stations along the centreline
+    n_pts = len(cx)
+    idx   = np.linspace(0, n_pts - 1, min(n_stations, n_pts)).astype(int)
+    cx_s  = cx[idx];  cy_s = cy[idx]
+    # cumulative arc distance
+    dx = np.diff(cx_s);  dy = np.diff(cy_s)
+    dist_s = np.concatenate([[0.0], np.cumsum(np.sqrt(dx**2 + dy**2))])
+
+    # ── figure ────────────────────────────────────────────────────────
+    fig = plt.figure(figsize=(18, 10))
+    fig.patch.set_facecolor("#0d1117")
+    gs = mgridspec.GridSpec(2, 2, figure=fig,
+                            left=0.04, right=0.97, top=0.93, bottom=0.05,
+                            hspace=0.32, wspace=0.22,
+                            width_ratios=[1.6, 1])
+
+    TC = "#e8e8e8";  DIM = "#a0a0a0"
+
+    # ── Panel 1: 3D CAD view ─────────────────────────────────────────
+    ax3d = fig.add_subplot(gs[:, 0], projection="3d")
+    ax3d.set_facecolor("#0d1117")
+
+    # perpendicular normal at each station
+    normals = []
+    for i, k in enumerate(idx):
+        i0, i1 = max(0, k - 1), min(n_pts - 1, k + 1)
+        ddx = cx[i1] - cx[i0];  ddy = cy[i1] - cy[i0]
+        dn  = math.hypot(ddx, ddy) or 1e-9
+        normals.append((-ddy / dn, ddx / dn))   # perpendicular
+
+    # extrude: walls (green triangular strips between stations)
+    wall_col  = "#1a3a5a"
+    water_col = "#1a6080"
+    bed_col   = "#2a2a3a"
+
+    for i in range(len(idx) - 1):
+        nx0, ny0 = normals[i];   nx1, ny1 = normals[i + 1]
+        x0c, y0c = cx_s[i],  cy_s[i]
+        x1c, y1c = cx_s[i + 1], cy_s[i + 1]
+
+        # bed quad
+        bverts = [
+            [(x0c + nx0*(-B/2), y0c + ny0*(-B/2), z0),
+             (x0c + nx0*( B/2), y0c + ny0*( B/2), z0),
+             (x1c + nx1*( B/2), y1c + ny1*( B/2), z0),
+             (x1c + nx1*(-B/2), y1c + ny1*(-B/2), z0)]
+        ]
+        ax3d.add_collection3d(
+            Poly3DCollection(bverts, facecolor=bed_col,
+                             edgecolor="#404050", linewidth=0.3, alpha=0.85, zorder=2))
+
+        # left wall quad
+        for sign in (-1, 1):
+            lverts = [
+                [(x0c + nx0*(sign*B/2),              y0c + ny0*(sign*B/2),            z0),
+                 (x0c + nx0*(sign*(B/2 + m*total_h)), y0c + ny0*(sign*(B/2 + m*total_h)), z0 + total_h),
+                 (x1c + nx1*(sign*(B/2 + m*total_h)), y1c + ny1*(sign*(B/2 + m*total_h)), z0 + total_h),
+                 (x1c + nx1*(sign*B/2),               y1c + ny1*(sign*B/2),            z0)]
+            ]
+            ax3d.add_collection3d(
+                Poly3DCollection(lverts, facecolor=wall_col,
+                                 edgecolor="#2a4a6a", linewidth=0.3, alpha=0.9, zorder=2))
+
+        # water surface quad
+        wverts = [
+            [(x0c + nx0*(-B/2 - m*D), y0c + ny0*(-B/2 - m*D), z0 + D),
+             (x0c + nx0*( B/2 + m*D), y0c + ny0*( B/2 + m*D), z0 + D),
+             (x1c + nx1*( B/2 + m*D), y1c + ny1*( B/2 + m*D), z0 + D),
+             (x1c + nx1*(-B/2 - m*D), y1c + ny1*(-B/2 - m*D), z0 + D)]
+        ]
+        ax3d.add_collection3d(
+            Poly3DCollection(wverts, facecolor=water_col,
+                             edgecolor=None, alpha=0.55, zorder=3))
+
+    # upstream end-cap section outline
+    nx0, ny0 = normals[0]
+    x0c, y0c = cx_s[0], cy_s[0]
+    cap_x = [x0c + nx0*w for w in sec_w]
+    cap_y = [y0c + ny0*w for w in sec_w]
+    ax3d.plot(cap_x, cap_y, sec_z, color="#5090d0", linewidth=1.8, zorder=6)
+    # water outline on end-cap
+    wc_x = [x0c + nx0*w for w in water_w]
+    wc_y = [y0c + ny0*w for w in water_w]
+    ax3d.plot(wc_x + [wc_x[0]], wc_y + [wc_y[0]],
+              list(water_z) + [water_z[0]], color="#30b0e0", linewidth=1.2, zorder=6)
+
+    # centreline
+    ax3d.plot(cx_s, cy_s, [z0 - 0.05] * len(cx_s),
+              color="#e0c040", linewidth=1.2, linestyle="--", zorder=7, label="Centreline")
+
+    ax3d.set_xlabel("X Lambert-93 (m)", color=DIM, fontsize=7, labelpad=4)
+    ax3d.set_ylabel("Y Lambert-93 (m)", color=DIM, fontsize=7, labelpad=4)
+    ax3d.set_zlabel("Elevation (m)",    color=DIM, fontsize=7, labelpad=2)
+    ax3d.set_title("A — 3D Canal CAD Model  (IS 10430 · IS 5968)",
+                   color=TC, fontsize=10, pad=8)
+    ax3d.tick_params(colors="#808080", labelsize=6)
+    ax3d.view_init(elev=28, azim=-55)
+    ax3d.set_facecolor("#0d1117")
+    for pane in (ax3d.xaxis.pane, ax3d.yaxis.pane, ax3d.zaxis.pane):
+        pane.fill = False
+        pane.set_edgecolor("#252535")
+
+    # legend patches
+    leg_patches = [
+        mpatches.Patch(color=wall_col,  label=f"Concrete lining (B={B:.2f} m, m={m})"),
+        mpatches.Patch(color=water_col, label=f"Water (D={D:.2f} m)"),
+        mpatches.Patch(color="#e0c040", label=f"Centreline  L={L:.0f} m"),
+    ]
+    ax3d.legend(handles=leg_patches, fontsize=7, facecolor="#1a1a2a",
+                edgecolor="#3a3a4a", labelcolor=TC, loc="upper left")
+
+    # ── Panel 2: annotated 2D cross-section ──────────────────────────
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax2.set_facecolor("#0d1117")
+    ax2.set_aspect("equal")
+
+    # fill areas
+    ax2.fill_between(sec_w, z0, sec_z, color="#1a3a5a", alpha=0.85)
+    ax2.fill_between(water_w, z0, water_z, color="#1a6080", alpha=0.7)
+    ax2.axhline(z0 + D, color="#30b0e0", linewidth=1.2, linestyle="--", alpha=0.8)
+    ax2.plot(sec_w,   sec_z,   color="#5090d0", linewidth=2.0)
+    ax2.plot(water_w, water_z, color="#30b0e0", linewidth=1.5)
+
+    # dimension lines
+    dkw = dict(color="#e0c040", fontsize=7.5, ha="center")
+    ax2.annotate("", xy=(B/2, z0 - 0.3), xytext=(-B/2, z0 - 0.3),
+                 arrowprops=dict(arrowstyle="<->", color="#e0c040", lw=1.2))
+    ax2.text(0, z0 - 0.45, f"B = {B:.2f} m", **dkw)
+    ax2.annotate("", xy=(B/2 + m*D + 0.4, z0 + D), xytext=(B/2 + m*D + 0.4, z0),
+                 arrowprops=dict(arrowstyle="<->", color="#e0a030", lw=1.2))
+    ax2.text(B/2 + m*D + 0.7, z0 + D/2, f"D = {D:.2f} m",
+             color="#e0a030", fontsize=7.5, va="center")
+    ax2.annotate("", xy=(B/2 + m*total_h + 0.4, z0 + total_h),
+                 xytext=(B/2 + m*D + 0.4, z0 + D),
+                 arrowprops=dict(arrowstyle="<->", color="#c0c040", lw=1.0))
+    ax2.text(B/2 + m*total_h + 0.7, z0 + D + fb/2,
+             f"fb = {fb:.2f} m", color="#c0c040", fontsize=7, va="center")
+    # top-width
+    ax2.annotate("", xy=(B/2 + m*total_h, z0 + total_h + 0.2),
+                 xytext=(-(B/2 + m*total_h), z0 + total_h + 0.2),
+                 arrowprops=dict(arrowstyle="<->", color="#a0e0a0", lw=1.0))
+    ax2.text(0, z0 + total_h + 0.35, f"Tw = {Tw:.2f} m",
+             color="#a0e0a0", fontsize=7.5, ha="center")
+    # slope label
+    ax2.text(-(B/2 + m*D/2) - 0.05, z0 + D/2,
+             f"1:{m:.1f}", color=TC, fontsize=7, ha="right", va="center", style="italic")
+
+    # info box
+    info = (f"Q = {Q:.1f} m³/s    V = {V:.2f} m/s\n"
+            f"n = {n:.3f}    S = 1:{int(round(1/max(S,1e-9)))}\n"
+            f"IS 10430:2000  ✓")
+    ax2.text(0, z0 - 0.9, info, color=TC, fontsize=7.5, ha="center",
+             va="top", family="monospace",
+             bbox=dict(boxstyle="round,pad=0.3", fc="#1a1a2a", ec="#3a3a4a"))
+
+    ax2.set_title("B — Annotated Cross-Section", color=TC, fontsize=9)
+    ax2.tick_params(colors="#808080", labelsize=6)
+    for sp in ax2.spines.values():
+        sp.set_color("#303040")
+    ax2.set_xlim(-(B/2 + m*total_h) - 1.2, (B/2 + m*total_h) + 1.8)
+    ax2.set_ylim(z0 - 1.1, z0 + total_h + 0.7)
+    ax2.set_xlabel("Width offset (m)", color=DIM, fontsize=7)
+    ax2.set_ylabel("Elevation (m)",    color=DIM, fontsize=7)
+
+    # ── Panel 3: plan view ────────────────────────────────────────────
+    ax3 = fig.add_subplot(gs[1, 1])
+    ax3.set_facecolor("#0d1117")
+    ax3.set_aspect("equal")
+
+    lx, ly, rx, ry = _canal_footprint(cx, cy, Tw)
+    ax3.fill(np.concatenate([lx, rx[::-1]]),
+             np.concatenate([ly, ry[::-1]]),
+             color="#1a3a5a", alpha=0.7, label="Canal footprint")
+    ax3.plot(cx, cy, color="#e0c040", linewidth=1.4,
+             linestyle="--", label="Centreline")
+    ax3.plot(lx, ly, color="#5090d0", linewidth=0.9)
+    ax3.plot(rx, ry, color="#5090d0", linewidth=0.9)
+
+    ax3.set_title("C — Plan View (footprint on reach)", color=TC, fontsize=9)
+    ax3.tick_params(colors="#808080", labelsize=6)
+    ax3.legend(fontsize=7, facecolor="#1a1a2a", edgecolor="#3a3a4a", labelcolor=TC)
+    ax3.set_xlabel("X Lambert-93 (m)", color=DIM, fontsize=7)
+    ax3.set_ylabel("Y Lambert-93 (m)", color=DIM, fontsize=7)
+    for sp in ax3.spines.values():
+        sp.set_color("#303040")
+
+    fig.suptitle(
+        f"Canal CAD Model — IS 10430 · IS 5968   "
+        f"B={B:.2f} m · D={D:.2f} m · Q={Q:.0f} m³/s · n={n:.3f}",
+        color=TC, fontsize=11, y=0.97)
+
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
+    plt.close(fig)
+    print(f"  Canal CAD figure → {out_path}")
+
+
 if __name__ == "__main__":
     import json, sys, os
     sys.path.insert(0, ".")
@@ -551,4 +796,10 @@ if __name__ == "__main__":
         out_path       = "assets/canal_3d_overlay.png",
         sub            = 6,
         d8_result      = d8,
+    )
+
+    generate_canal_cad_figure(
+        canal_params = params,
+        reach_geo    = geo,
+        out_path     = "assets/canal_cad_model.png",
     )

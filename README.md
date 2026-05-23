@@ -306,6 +306,10 @@ flow_depth.tif  ──► Z_bed = Z_surface − h
 
 ### 🧱 Stage 7c — 3D CAD Model via FreeCAD
 
+<img src="assets/canal_cad_model.png" width="100%"/>
+
+*Three-panel CAD view: **A** 3D canal section extruded along the reach centreline · **B** annotated cross-section with B, D, freeboard dimensions · **C** plan footprint on the Lambert-93 reach.*
+
 <details>
 <summary>🔍 FreeCAD sweep + STEP/OBJ export</summary>
 
