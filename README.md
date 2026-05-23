@@ -1,6 +1,6 @@
 # 🌊 opyf_colab
 
-**[🚀 Open Pipeline Notebook](https://github.com/1kaiser/opyf_colab/blob/main/pipeline_notebook.ipynb)**  |  **[🚀 Open In Colab](https://colab.research.google.com/github/1kaiser/opyf_colab/blob/main/jax_3d_reconstruction_colab.ipynb)**
+**[📓 Pipeline Notebook (jupytext)](https://github.com/1kaiser/opyf_colab/blob/main/pipeline_nb.ipynb)**  |  **[🚀 Open In Colab](https://colab.research.google.com/github/1kaiser/opyf_colab/blob/main/jax_3d_reconstruction_colab.ipynb)**
 
 > **Event-day video → metric flow depth → discharge → D8 thalweg (slope/curvature) → IS-code canal design → 3D model.**  
 > Built on JAX · Depth Pro · LightGlue · FreeCAD.
@@ -16,9 +16,9 @@
 **📁 Repo layout**
 ```
 opyf_colab/
-├── pipeline.py              ← single entry-point
-├── make_notebook.py         ← generates pipeline_notebook.ipynb
-├── pipeline_notebook.ipynb  ← Jupyter / Papermill notebook
+├── pipeline.py              ← single entry-point (CLI)
+├── pipeline_nb.py           ← jupytext percent-format notebook source
+├── pipeline_nb.ipynb        ← executed notebook (jupytext → Papermill)
 │
 ├── modules/
 │   ├── depth_to_elevation.py
@@ -112,22 +112,25 @@ All outputs land in `output/brague/` and figures in `assets/`.
 
 ### 📓 Jupyter / Papermill
 
-```bash
-# Generate the notebook
-conda run -n num_gpu python3 make_notebook.py
+`pipeline_nb.py` is the **jupytext percent-format** source — edit it like a
+Python script and jupytext keeps it in sync with `pipeline_nb.ipynb`.
 
-# Execute all stages (with cached depth + alignment)
-conda run -n num_gpu papermill pipeline_notebook.ipynb pipeline_notebook.ipynb \
+```bash
+# Convert script → notebook (jupytext, kernel = num_gpu)
+conda run -n num_gpu jupytext --to notebook pipeline_nb.py \
+  -o pipeline_nb.ipynb --set-kernel num_gpu
+
+# Execute with Papermill (cached depth + alignment)
+JAX_PLATFORMS=cpu conda run -n num_gpu papermill pipeline_nb.ipynb pipeline_nb.ipynb \
   -p SKIP_DOWNLOAD True -p SKIP_DEPTH True -p SKIP_ALIGN True
 
-# Override a single parameter — e.g. change number of depth frames
-conda run -n num_gpu papermill pipeline_notebook.ipynb pipeline_notebook.ipynb \
+# Override parameters — e.g. more depth frames, or run full pipeline
+JAX_PLATFORMS=cpu conda run -n num_gpu papermill pipeline_nb.ipynb pipeline_nb.ipynb \
   -p SKIP_DOWNLOAD True -p N_FRAMES 10
 ```
 
-The notebook (`pipeline_notebook.ipynb`) mirrors `pipeline.py` stage-by-stage,
-with inline display of every output figure. Re-run `make_notebook.py` after
-editing `pipeline.py` to keep them in sync.
+Edit `pipeline_nb.py` → `jupytext --sync pipeline_nb.ipynb` to propagate
+changes without losing cell outputs.
 
 ---
 
