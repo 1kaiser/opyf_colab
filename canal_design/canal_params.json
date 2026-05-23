@@ -1,0 +1,20 @@
+{
+    "Q_target_m3s": 50.0,
+    "bed_width_m": 2.5855,
+    "water_depth_m": 4.2697,
+    "side_slope": 1.5,
+    "freeboard_m": 0.6,
+    "total_depth_m": 4.8697,
+    "top_width_m": 17.1945,
+    "flow_area_m2": 38.3842,
+    "wetted_perimeter_m": 17.98,
+    "Q_calculated_m3s": 50.0,
+    "velocity_ms": 1.3026,
+    "min_curve_radius_m": 1000.0,
+    "manning_n": 0.018,
+    "long_slope": 0.0002,
+    "lining": "concrete",
+    "IS_velocity_ok": true,
+    "IS_discharge_ok": true,
+    "IS_side_slope_ok": true
+}
