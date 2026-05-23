@@ -632,13 +632,40 @@ def run_lspiv(
         result_to_plot = list(results.values())[0]
 
     assets.mkdir(parents=True, exist_ok=True)
+
+    # ── 6-panel LSPIV summary (lspiv_viz.py) ─────────────────────────
     out = assets / "lspiv_results.png"
     plot_lspiv_results(
         result=result_to_plot,
         ortho_tif=ortho_tif,
         out_path=str(out),
     )
-    print(f"  Saved → {out}")
+
+    # ── opyflow-style figures (3 figures from original notebook) ──────
+    try:
+        from modules.opyflow_style_viz import generate_opyflow_figures
+        from modules.jax_lspiv import (
+            GCP_IMAGE_1139, GCP_MODEL_1139,
+            GCP_IMAGE_1142, GCP_MODEL_1142,
+        )
+        gcp_image = {}; gcp_model = {}
+        if "1139" in results:
+            gcp_image["1139"] = GCP_IMAGE_1139
+            gcp_model["1139"] = GCP_MODEL_1139
+        if "1142" in results:
+            gcp_image["1142"] = GCP_IMAGE_1142
+            gcp_model["1142"] = GCP_MODEL_1142
+
+        generate_opyflow_figures(
+            results=results,
+            ortho_tif=ortho_tif,
+            gcp_image=gcp_image,
+            gcp_model=gcp_model,
+            assets_dir=str(assets),
+        )
+    except Exception as exc:
+        print(f"  [WARN] opyflow_style_viz failed: {exc}")
+
     return result_to_plot
 
 

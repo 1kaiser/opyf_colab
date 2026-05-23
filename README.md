@@ -349,6 +349,28 @@ flow_depth.tif  ──► Z_bed = Z_surface − h
 
 Discharge Q = α ∫ V · h dl, α = 0.9. Processes **IMG_1139** (downstream bridge) and **IMG_1142** (upstream bridge) simultaneously.
 
+#### opyflow-equivalent figures (JAX reimplementation)
+
+The following three figures replicate the code blocks in the [original opyflow notebook](https://github.com/groussea/opyflow/blob/master/tests/Test_Brague_flood/test_opyf_LSPIV_Brague.md) using our JAX pipeline and the same Brague flood inputs.
+
+**Bird-eye orthorectification** (`birdEyeTransf1139.png` equivalent):
+
+<img src="assets/opyflow_birdeye.png" width="100%"/>
+
+*DLT-orthorectified first frame from each bridge with GCP marker positions annotated. Equivalent of opyflow's `birdEyeTransf1139.png`.*
+
+**Velocity colour field** (`1139.png` + `1142.png` equivalent):
+
+<img src="assets/opyflow_velocity_field.png" width="100%"/>
+
+*Interpolated surface velocity field (scatter + quiver) on orthorectified Ortho.tif background, one panel per bridge. Equivalent of opyflow's `1139.png` / `1142.png`.*
+
+**Combined discharge figure** (`figure_Brague.png` equivalent):
+
+<img src="assets/figure_brague.png" width="100%"/>
+
+*Left: combined 1139+1142 velocity scatter on Ortho.tif background with transect L→R. Right inset: velocity profile + bathymetry cross-section + Q annotation. Equivalent of opyflow's published `figure_Brague.png` (paper: Q = 102 ± 20 m³/s).*
+
 ---
 
 ### 🧱 Stage 7c — 3D CAD Model via FreeCAD

@@ -360,7 +360,18 @@ Pipeline per video:
 5. MNT transect sampling → depth profile
 6. Discharge integration Q = α ∫ V · h dl  (α = 0.9)
 
-Output: `assets/lspiv_results.png`
+Also generates three **opyflow-equivalent figures** that replicate the code blocks
+from the [original opyflow notebook](https://github.com/groussea/opyflow/blob/master/tests/Test_Brague_flood/test_opyf_LSPIV_Brague.md)
+using our JAX pipeline:
+
+| opyflow original | JAX equivalent |
+|---|---|
+| `birdEyeTransf1139.png` | `assets/opyflow_birdeye.png` |
+| `1139.png` + `1142.png` | `assets/opyflow_velocity_field.png` |
+| `figure_Brague.png` | `assets/figure_brague.png` |
+
+Outputs: `assets/lspiv_results.png`, `assets/opyflow_birdeye.png`,
+`assets/opyflow_velocity_field.png`, `assets/figure_brague.png`
 """))
 
 CELLS.append(code(
@@ -384,9 +395,43 @@ else:
 
 CELLS.append(code(
     """\
+# 6-panel LSPIV summary
 lspiv_img = Path(ASSETS_DIR) / "lspiv_results.png"
 if lspiv_img.exists():
     display(Image(str(lspiv_img), width=900))
+"""))
+
+CELLS.append(md("""### opyflow-equivalent figures (JAX reimplementation)
+
+Replicates the three figure code blocks from the original opyflow Brague notebook
+using JAX outputs and the same GCPs / input data.
+"""))
+
+CELLS.append(code(
+    """\
+# birdEyeTransf1139.png equivalent
+birdeye = Path(ASSETS_DIR) / "opyflow_birdeye.png"
+if birdeye.exists():
+    print("Bird-eye orthorectified frames (birdEyeTransf1139.png equivalent)")
+    display(Image(str(birdeye), width=900))
+"""))
+
+CELLS.append(code(
+    """\
+# 1139.png + 1142.png equivalent
+vel_field = Path(ASSETS_DIR) / "opyflow_velocity_field.png"
+if vel_field.exists():
+    print("Velocity colour field (1139.png + 1142.png equivalent)")
+    display(Image(str(vel_field), width=900))
+"""))
+
+CELLS.append(code(
+    """\
+# figure_Brague.png equivalent
+fig_brague = Path(ASSETS_DIR) / "figure_brague.png"
+if fig_brague.exists():
+    print("figure_Brague.png equivalent — scatter + transect + Q")
+    display(Image(str(fig_brague), width=900))
 """))
 
 # ── Stage 8 viz ───────────────────────────────────────────────────────────────
