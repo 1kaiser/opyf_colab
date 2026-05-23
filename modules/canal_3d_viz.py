@@ -523,240 +523,353 @@ def generate_canal_3d_overlay(
 def generate_canal_cad_figure(
     canal_params: dict,
     reach_geo:    dict,
-    out_path:     str = "assets/canal_cad_model.png",
-    n_stations:   int = 40,
+    out_path:     str   = "assets/canal_cad_model.png",
+    display_len:  float = None,   # metres of canal to render; None = auto
 ):
     """
-    Standalone 3-panel CAD model figure for Stage 7c.
+    4-view engineering drawing: Front · Side · Top · Isometric, each with
+    dimension lines.  Uses local (canal-axis) coordinates so all views are
+    self-consistent regardless of the Lambert-93 centreline orientation.
 
-    Panel 1 (large, 3D) — isometric view of the canal section extruded along
-                           the centreline: bed, walls, water surface, freeboard
-    Panel 2 (top-right)  — annotated 2D cross-section with key dimensions
-    Panel 3 (bot-right)  — plan view showing canal footprint on the reach
+    Layout
+    ------
+      Row 0:  [ FRONT VIEW (cross-section) ]  [ SIDE VIEW (longitudinal) ]
+      Row 1:  [  TOP VIEW  (plan)          ]  [   ISOMETRIC (3-D)        ]
     """
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
     import matplotlib.gridspec as mgridspec
-    from matplotlib.patches import FancyArrowPatch
-    from mpl_toolkits.mplot3d import Axes3D
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
+    # ── canal parameters ─────────────────────────────────────────────
     B   = canal_params["bed_width_m"]
     D   = canal_params["water_depth_m"]
     m   = canal_params["side_slope"]
     fb  = canal_params["freeboard_m"]
     Q   = canal_params.get("Q_calculated_m3s", 50.0)
     V   = canal_params.get("velocity_ms", 1.3)
-    n   = canal_params.get("manning_n", 0.018)
-    S   = canal_params.get("long_slope", 1 / 55)
+    n_m = canal_params.get("manning_n", 0.018)
+    S   = canal_params.get("long_slope", 1.0 / 5000)
     Tw  = canal_params.get("top_width_m", B + 2 * m * (D + fb))
-
-    cx  = reach_geo["centerline_x"]
-    cy  = reach_geo["centerline_y"]
+    H   = D + fb           # total lining height
     L   = reach_geo["reach_length_m"]
 
-    # ── derive mean Z_bed elevation (flat canal for display) ─────────
-    z0  = 1011.5   # approximate mean bed elevation (Brague reach)
+    # display length: show a ~3-canal-width section, min 10 m
+    if display_len is None:
+        display_len = float(np.clip(3.0 * Tw, 10.0, 80.0))
 
-    # ── section profile (offset from centreline, elevation) ─────────
-    total_h = D + fb
-    sec_w = np.array([-(B/2 + m*total_h), -(B/2 + m*D), -B/2,
-                       B/2, B/2 + m*D,  B/2 + m*total_h])
-    sec_z = np.array([z0 + total_h, z0 + D, z0,
-                       z0,           z0 + D, z0 + total_h])
-    water_w = np.array([-(B/2 + m*D), -B/2, B/2, B/2 + m*D])
-    water_z = np.array([z0 + D,        z0,   z0,  z0 + D])
+    # vertical exaggeration for side view (make slope visible)
+    drop = S * display_len
+    # target drop to occupy ~25 % of panel height
+    VE = max(1, int(math.ceil(0.25 * H / drop))) if drop > 1e-9 else 1
+    VE = min(VE, 200)   # cap to avoid absurd labels
 
-    # pick evenly-spaced stations along the centreline
-    n_pts = len(cx)
-    idx   = np.linspace(0, n_pts - 1, min(n_stations, n_pts)).astype(int)
-    cx_s  = cx[idx];  cy_s = cy[idx]
-    # cumulative arc distance
-    dx = np.diff(cx_s);  dy = np.diff(cy_s)
-    dist_s = np.concatenate([[0.0], np.cumsum(np.sqrt(dx**2 + dy**2))])
+    # ── canonical section vertices (local: x=width, z=elev) ─────────
+    # Outer profile (6 pts, closed)
+    sx = np.array([-(B/2 + m*H), -(B/2 + m*D), -B/2,
+                    B/2,           B/2 + m*D,    B/2 + m*H])
+    sz = np.array([H, D, 0, 0, D, H])
+    # Water body outline (4 pts)
+    wx = np.array([-(B/2 + m*D), -B/2, B/2, B/2 + m*D])
+    wz = np.array([D, 0, 0, D])
 
-    # ── figure ────────────────────────────────────────────────────────
-    fig = plt.figure(figsize=(18, 10))
-    fig.patch.set_facecolor("#0d1117")
-    gs = mgridspec.GridSpec(2, 2, figure=fig,
-                            left=0.04, right=0.97, top=0.93, bottom=0.05,
-                            hspace=0.32, wspace=0.22,
-                            width_ratios=[1.6, 1])
+    # ── colour palette ────────────────────────────────────────────────
+    TC     = "#e8e8e8"
+    DIM    = "#a0a0a0"
+    C_WALL = "#1a3a5a"
+    C_WAT  = "#1a6080"
+    C_BED  = "#2a2a3a"
+    C_LINE = "#5090d0"
+    C_B    = "#e0c040"    # bed-width dim
+    C_D    = "#e0a030"    # depth dim
+    C_FB   = "#c0c040"    # freeboard dim
+    C_TW   = "#a0e0a0"    # top-width dim
+    C_L    = "#d060c0"    # length dim
+    C_S    = "#60c0d0"    # slope dim
+    C_CL   = "#e0c040"    # centreline
+    BG     = "#0d1117"
 
-    TC = "#e8e8e8";  DIM = "#a0a0a0"
+    # ── dimension-line helpers ────────────────────────────────────────
+    def _dim_h(ax, x1, x2, y_base, y_off, label, col, fs=7.5, va="bottom"):
+        """Horizontal dimension with extension lines."""
+        ey = y_base + y_off * 0.6
+        dy = y_base + y_off
+        ax.plot([x1, x1], [y_base, ey], color=col, lw=0.7, ls="--", alpha=0.6)
+        ax.plot([x2, x2], [y_base, ey], color=col, lw=0.7, ls="--", alpha=0.6)
+        ax.annotate("", xy=(x2, dy), xytext=(x1, dy),
+                    arrowprops=dict(arrowstyle="<->", color=col,
+                                    lw=1.1, mutation_scale=8))
+        yo = dy + abs(y_off) * 0.18 if va == "bottom" else dy - abs(y_off) * 0.18
+        ax.text((x1 + x2) / 2, yo, label, color=col, fontsize=fs,
+                ha="center", va=va)
 
-    # ── Panel 1: 3D CAD view ─────────────────────────────────────────
-    ax3d = fig.add_subplot(gs[:, 0], projection="3d")
-    ax3d.set_facecolor("#0d1117")
+    def _dim_v(ax, y1, y2, x_base, x_off, label, col, fs=7.5):
+        """Vertical dimension with extension lines."""
+        ex = x_base + x_off * 0.6
+        dx = x_base + x_off
+        ax.plot([x_base, ex], [y1, y1], color=col, lw=0.7, ls="--", alpha=0.6)
+        ax.plot([x_base, ex], [y2, y2], color=col, lw=0.7, ls="--", alpha=0.6)
+        ax.annotate("", xy=(dx, y2), xytext=(dx, y1),
+                    arrowprops=dict(arrowstyle="<->", color=col,
+                                    lw=1.1, mutation_scale=8))
+        ax.text(dx + abs(x_off) * 0.18, (y1 + y2) / 2, label, color=col,
+                fontsize=fs, va="center", ha="left")
 
-    # perpendicular normal at each station
-    normals = []
-    for i, k in enumerate(idx):
-        i0, i1 = max(0, k - 1), min(n_pts - 1, k + 1)
-        ddx = cx[i1] - cx[i0];  ddy = cy[i1] - cy[i0]
-        dn  = math.hypot(ddx, ddy) or 1e-9
-        normals.append((-ddy / dn, ddx / dn))   # perpendicular
+    def _spine_style(ax):
+        for sp in ax.spines.values():
+            sp.set_color("#303040")
+        ax.tick_params(colors="#808080", labelsize=6)
+        ax.set_facecolor(BG)
 
-    # extrude: walls (green triangular strips between stations)
-    wall_col  = "#1a3a5a"
-    water_col = "#1a6080"
-    bed_col   = "#2a2a3a"
+    # ── figure layout ─────────────────────────────────────────────────
+    fig = plt.figure(figsize=(22, 14))
+    fig.patch.set_facecolor(BG)
+    gs = mgridspec.GridSpec(
+        2, 2, figure=fig,
+        left=0.06, right=0.97, top=0.93, bottom=0.05,
+        hspace=0.38, wspace=0.28,
+        width_ratios=[1, 2.2],
+        height_ratios=[1, 1],
+    )
 
-    for i in range(len(idx) - 1):
-        nx0, ny0 = normals[i];   nx1, ny1 = normals[i + 1]
-        x0c, y0c = cx_s[i],  cy_s[i]
-        x1c, y1c = cx_s[i + 1], cy_s[i + 1]
+    # ════════════════════════════════════════════════════════════════
+    # PANEL A — FRONT VIEW  (cross-section, looking upstream: X vs Z)
+    # ════════════════════════════════════════════════════════════════
+    axF = fig.add_subplot(gs[0, 0])
+    _spine_style(axF)
 
-        # bed quad
-        bverts = [
-            [(x0c + nx0*(-B/2), y0c + ny0*(-B/2), z0),
-             (x0c + nx0*( B/2), y0c + ny0*( B/2), z0),
-             (x1c + nx1*( B/2), y1c + ny1*( B/2), z0),
-             (x1c + nx1*(-B/2), y1c + ny1*(-B/2), z0)]
-        ]
-        ax3d.add_collection3d(
-            Poly3DCollection(bverts, facecolor=bed_col,
-                             edgecolor="#404050", linewidth=0.3, alpha=0.85, zorder=2))
+    # fill concrete lining (polygon)
+    poly_x = list(sx) + [sx[0]]
+    poly_z = list(sz) + [sz[0]]
+    axF.fill(poly_x, poly_z, color=C_WALL, alpha=0.85, zorder=2)
+    # fill water body
+    axF.fill(list(wx) + [wx[0]], list(wz) + [wz[0]],
+             color=C_WAT, alpha=0.7, zorder=3)
+    # water surface line
+    axF.axhline(D, color="#30b0e0", lw=1.2, ls="--", alpha=0.85, zorder=4)
+    # section outline
+    axF.plot(poly_x, poly_z, color=C_LINE, lw=2.0, zorder=5)
+    # centreline tick
+    axF.axvline(0, color=C_CL, lw=0.8, ls=":", alpha=0.5, zorder=4)
 
-        # left wall quad
-        for sign in (-1, 1):
-            lverts = [
-                [(x0c + nx0*(sign*B/2),              y0c + ny0*(sign*B/2),            z0),
-                 (x0c + nx0*(sign*(B/2 + m*total_h)), y0c + ny0*(sign*(B/2 + m*total_h)), z0 + total_h),
-                 (x1c + nx1*(sign*(B/2 + m*total_h)), y1c + ny1*(sign*(B/2 + m*total_h)), z0 + total_h),
-                 (x1c + nx1*(sign*B/2),               y1c + ny1*(sign*B/2),            z0)]
-            ]
-            ax3d.add_collection3d(
-                Poly3DCollection(lverts, facecolor=wall_col,
-                                 edgecolor="#2a4a6a", linewidth=0.3, alpha=0.9, zorder=2))
+    # ── dimension lines ──────────────────────────────────────────────
+    pad_x = 0.12 * Tw;   pad_z = 0.12 * H
+    # Bed width B
+    _dim_h(axF, -B/2, B/2, 0.0, -(pad_z * 1.0), f"B = {B:.2f} m", C_B)
+    # Top width Tw
+    _dim_h(axF, -Tw/2, Tw/2, H, pad_z * 1.0, f"Tw = {Tw:.2f} m", C_TW)
+    # Water depth D
+    _dim_v(axF, 0.0, D, Tw/2, pad_x * 1.1, f"D = {D:.2f} m", C_D)
+    # Freeboard fb
+    _dim_v(axF, D, H,  Tw/2, pad_x * 1.1, f"fb = {fb:.2f} m", C_FB)
+    # Side slope label
+    axF.text(-(B/2 + m*D/2) - 0.03*(Tw/2), D/2,
+             f"1 : {m:.1f}", color=TC, fontsize=7.5,
+             ha="right", va="center", style="italic")
+    axF.text( (B/2 + m*D/2) + 0.03*(Tw/2), D/2,
+             f"1 : {m:.1f}", color=TC, fontsize=7.5,
+             ha="left", va="center", style="italic")
 
-        # water surface quad
-        wverts = [
-            [(x0c + nx0*(-B/2 - m*D), y0c + ny0*(-B/2 - m*D), z0 + D),
-             (x0c + nx0*( B/2 + m*D), y0c + ny0*( B/2 + m*D), z0 + D),
-             (x1c + nx1*( B/2 + m*D), y1c + ny1*( B/2 + m*D), z0 + D),
-             (x1c + nx1*(-B/2 - m*D), y1c + ny1*(-B/2 - m*D), z0 + D)]
-        ]
-        ax3d.add_collection3d(
-            Poly3DCollection(wverts, facecolor=water_col,
-                             edgecolor=None, alpha=0.55, zorder=3))
+    axF.set_xlim(-Tw/2 - pad_x * 2.5, Tw/2 + pad_x * 3.5)
+    axF.set_ylim(-pad_z * 2.2, H + pad_z * 2.2)
+    axF.set_aspect("equal", adjustable="box")
+    axF.set_xlabel("Width  (m)", color=DIM, fontsize=7)
+    axF.set_ylabel("Elevation  (m)", color=DIM, fontsize=7)
+    axF.set_title("A — FRONT VIEW  (cross-section)", color=TC, fontsize=9,
+                  pad=5)
 
-    # upstream end-cap section outline
-    nx0, ny0 = normals[0]
-    x0c, y0c = cx_s[0], cy_s[0]
-    cap_x = [x0c + nx0*w for w in sec_w]
-    cap_y = [y0c + ny0*w for w in sec_w]
-    ax3d.plot(cap_x, cap_y, sec_z, color="#5090d0", linewidth=1.8, zorder=6)
-    # water outline on end-cap
-    wc_x = [x0c + nx0*w for w in water_w]
-    wc_y = [y0c + ny0*w for w in water_w]
-    ax3d.plot(wc_x + [wc_x[0]], wc_y + [wc_y[0]],
-              list(water_z) + [water_z[0]], color="#30b0e0", linewidth=1.2, zorder=6)
+    # ════════════════════════════════════════════════════════════════
+    # PANEL B — SIDE VIEW  (longitudinal, looking from bank: Y vs Z)
+    # ════════════════════════════════════════════════════════════════
+    axS = fig.add_subplot(gs[0, 1])
+    _spine_style(axS)
 
+    # y from 0 → display_len; z_bed drops with slope (scaled by VE)
+    ys  = np.array([0.0, display_len])
+    zb  = np.array([0.0, -S * display_len]) * VE      # bed (VE applied)
+    zt  = zb + H * VE                                   # top of lining
+
+    # lining: bottom edge, top edge, filled rectangle (sloped)
+    side_y = [0, display_len, display_len, 0]
+    side_z = [zb[0], zb[1], zt[1], zt[0]]
+    axS.fill(side_y, side_z, color=C_WALL, alpha=0.8, zorder=2)
+
+    # water body: from z_bed to z_bed + D*VE
+    water_side_y = [0, display_len, display_len, 0]
+    water_side_z = [zb[0], zb[1], zb[1] + D*VE, zb[0] + D*VE]
+    axS.fill(water_side_y, water_side_z, color=C_WAT, alpha=0.7, zorder=3)
+
+    # outline
+    axS.plot(side_y + [side_y[0]], side_z + [side_z[0]],
+             color=C_LINE, lw=1.8, zorder=5)
+    # water surface dashed line
+    axS.plot([0, display_len], [zb[0] + D*VE, zb[1] + D*VE],
+             color="#30b0e0", lw=1.2, ls="--", alpha=0.9, zorder=4)
+
+    pL = 0.06 * display_len
+    pH = 0.12 * H * VE
+    # Length dimension
+    _dim_h(axS, 0, display_len, zb[0], -(pH * 1.0), f"L = {display_len:.0f} m", C_L)
+    # Total height dimension at upstream end
+    _dim_v(axS, zb[0], zt[0], 0, -pL * 1.1,
+           f"H = {H:.2f} m" + (f" (×{VE} vert)" if VE > 1 else ""), TC)
+    # Slope annotation
+    mid_y = display_len / 2
+    mid_zb = (zb[0] + zb[1]) / 2
+    slope_str = f"S = 1:{int(round(1/max(S,1e-9)))}"
+    if VE > 1:
+        slope_str += f"  (VE {VE}×)"
+    axS.text(mid_y, mid_zb - pH * 0.5, slope_str,
+             color=C_S, fontsize=8, ha="center", va="top")
+    # slope arrow along bed
+    axS.annotate("", xy=(display_len * 0.8, zb[0] + (zb[1]-zb[0])*0.8 - pH*0.05),
+                 xytext=(display_len * 0.2, zb[0] + (zb[1]-zb[0])*0.2 - pH*0.05),
+                 arrowprops=dict(arrowstyle="-|>", color=C_S, lw=1.2), zorder=6)
+
+    axS.set_xlim(-pL * 1.5, display_len + pL * 1.0)
+    axS.set_ylim(zb[1] - pH * 2.8, zt[0] + pH * 2.5)
+    axS.set_xlabel("Distance along canal  (m)", color=DIM, fontsize=7)
+    axS.set_ylabel(f"Elevation  (m{', VE'+str(VE)+'×' if VE>1 else ''})",
+                   color=DIM, fontsize=7)
+    axS.set_title("B — SIDE VIEW  (longitudinal profile)", color=TC, fontsize=9,
+                  pad=5)
+
+    # ════════════════════════════════════════════════════════════════
+    # PANEL C — TOP VIEW  (plan, looking down: X vs Y)
+    # ════════════════════════════════════════════════════════════════
+    axT = fig.add_subplot(gs[1, 0])
+    _spine_style(axT)
+
+    # In plan: the canal rectangle is display_len × Tw
+    # inner bed shown dashed (B wide)
+    axT.fill([-Tw/2, Tw/2, Tw/2, -Tw/2],
+             [0, 0, display_len, display_len],
+             color=C_WALL, alpha=0.75, zorder=2)
+    # water / bed area (water surface projection = Tw_w × L)
+    Tw_w = B + 2 * m * D   # water top-width
+    axT.fill([-Tw_w/2, Tw_w/2, Tw_w/2, -Tw_w/2],
+             [0, 0, display_len, display_len],
+             color=C_WAT, alpha=0.6, zorder=3)
+    # bed outline dashed
+    axT.plot([-B/2, -B/2, B/2, B/2, -B/2],
+             [0, display_len, display_len, 0, 0],
+             color=C_B, lw=1.0, ls="--", zorder=4, alpha=0.9)
+    # outer walls
+    for xv in [-Tw/2, Tw/2]:
+        axT.plot([xv, xv], [0, display_len], color=C_LINE, lw=1.8, zorder=5)
+    axT.plot([-Tw/2, Tw/2], [0, 0],           color=C_LINE, lw=1.8, zorder=5)
+    axT.plot([-Tw/2, Tw/2], [display_len]*2,  color=C_LINE, lw=1.8, zorder=5)
     # centreline
-    ax3d.plot(cx_s, cy_s, [z0 - 0.05] * len(cx_s),
-              color="#e0c040", linewidth=1.2, linestyle="--", zorder=7, label="Centreline")
+    axT.plot([0, 0], [0, display_len], color=C_CL, lw=1.0, ls=":", zorder=4)
 
-    ax3d.set_xlabel("X Lambert-93 (m)", color=DIM, fontsize=7, labelpad=4)
-    ax3d.set_ylabel("Y Lambert-93 (m)", color=DIM, fontsize=7, labelpad=4)
-    ax3d.set_zlabel("Elevation (m)",    color=DIM, fontsize=7, labelpad=2)
-    ax3d.set_title("A — 3D Canal CAD Model  (IS 10430 · IS 5968)",
-                   color=TC, fontsize=10, pad=8)
-    ax3d.tick_params(colors="#808080", labelsize=6)
-    ax3d.view_init(elev=28, azim=-55)
-    ax3d.set_facecolor("#0d1117")
-    for pane in (ax3d.xaxis.pane, ax3d.yaxis.pane, ax3d.zaxis.pane):
+    pxT = 0.12 * Tw;   pyT = 0.07 * display_len
+    # Top width Tw
+    _dim_h(axT, -Tw/2, Tw/2, display_len, pyT * 1.2, f"Tw = {Tw:.2f} m", C_TW)
+    # Bed width B (below)
+    _dim_h(axT, -B/2, B/2, 0, -(pyT * 1.2), f"B = {B:.2f} m", C_B, va="top")
+    # Length L
+    _dim_v(axT, 0, display_len, Tw/2, pxT * 1.2,
+           f"L = {display_len:.0f} m", C_L)
+
+    axT.set_xlim(-Tw/2 - pxT * 2.5, Tw/2 + pxT * 3.5)
+    axT.set_ylim(-pyT * 3.5, display_len + pyT * 3.0)
+    axT.set_aspect("equal", adjustable="box")
+    axT.set_xlabel("Width  (m)", color=DIM, fontsize=7)
+    axT.set_ylabel("Distance along canal  (m)", color=DIM, fontsize=7)
+    axT.set_title("C — TOP VIEW  (plan)", color=TC, fontsize=9, pad=5)
+
+    # ════════════════════════════════════════════════════════════════
+    # PANEL D — ISOMETRIC  (3-D extruded section, local coords)
+    # ════════════════════════════════════════════════════════════════
+    axI = fig.add_subplot(gs[1, 1], projection="3d")
+    axI.set_facecolor(BG)
+    for pane in (axI.xaxis.pane, axI.yaxis.pane, axI.zaxis.pane):
         pane.fill = False
         pane.set_edgecolor("#252535")
 
-    # legend patches
+    n_seg = 30
+    ys_3d = np.linspace(0, display_len, n_seg + 1)
+
+    for i in range(n_seg):
+        y0, y1 = ys_3d[i], ys_3d[i + 1]
+        z_inv0 = -S * y0;  z_inv1 = -S * y1
+
+        # bed quad (flat bottom)
+        bv = [[(x, y0, z_inv0) for x in [-B/2, B/2]] +
+              [(B/2, y1, z_inv1), (-B/2, y1, z_inv1)]]
+        axI.add_collection3d(Poly3DCollection(bv, facecolor=C_BED,
+                             edgecolor="#404050", lw=0.3, alpha=0.9))
+        # left and right walls
+        for sign in (-1, 1):
+            wv = [[
+                (sign * B/2,          y0, z_inv0),
+                (sign * (B/2 + m*H),  y0, z_inv0 + H),
+                (sign * (B/2 + m*H),  y1, z_inv1 + H),
+                (sign * B/2,          y1, z_inv1),
+            ]]
+            axI.add_collection3d(Poly3DCollection(wv, facecolor=C_WALL,
+                                 edgecolor="#2a4a6a", lw=0.3, alpha=0.92))
+        # water surface quad
+        wv = [[
+            (-(B/2 + m*D), y0, z_inv0 + D),
+            ( (B/2 + m*D), y0, z_inv0 + D),
+            ( (B/2 + m*D), y1, z_inv1 + D),
+            (-(B/2 + m*D), y1, z_inv1 + D),
+        ]]
+        axI.add_collection3d(Poly3DCollection(wv, facecolor=C_WAT,
+                             edgecolor=None, alpha=0.55))
+
+    # upstream end-cap outline
+    cap_x = list(sx) + [sx[0]]
+    cap_z = [z + 0.0 for z in list(sz)] + [sz[0]]
+    axI.plot(cap_x, [0.0] * len(cap_x), cap_z, color=C_LINE, lw=2.0, zorder=6)
+
+    # downstream end-cap
+    zd = -S * display_len
+    axI.plot(cap_x, [display_len] * len(cap_x), [z + zd for z in cap_z],
+             color=C_LINE, lw=1.2, ls="--", zorder=5)
+
+    # centreline
+    axI.plot([0, 0], [0, display_len], [0, -S * display_len],
+             color=C_CL, lw=1.2, ls="--", zorder=7)
+
+    # ── isometric dimension annotations (3D text) ────────────────────
+    def _ann3d(ax, x1, y1, z1, x2, y2, z2, label, col):
+        ax.plot([x1, x2], [y1, y2], [z1, z2], color=col, lw=0.9, ls="--", alpha=0.7)
+        ax.text((x1+x2)/2, (y1+y2)/2, (z1+z2)/2, label, color=col, fontsize=7.5,
+                ha="center", va="center",
+                bbox=dict(boxstyle="round,pad=0.15", fc=BG, ec="none", alpha=0.7))
+
+    _ann3d(axI, -B/2, 0, 0, B/2, 0, 0, f"B = {B:.2f} m", C_B)
+    _ann3d(axI,  Tw/2, display_len/2, 0, Tw/2, display_len/2, H,
+           f"H = {H:.2f} m", C_D)
+    _ann3d(axI,  Tw/2, display_len/2, H, -Tw/2, display_len/2, H,
+           f"Tw = {Tw:.2f} m", C_TW)
+    _ann3d(axI, -Tw/2, 0, H*0.5, -Tw/2, display_len, H*0.5 - S*display_len,
+           f"L = {display_len:.0f} m", C_L)
+
+    axI.set_xlabel("Width  (m)",  color=DIM, fontsize=7, labelpad=3)
+    axI.set_ylabel("Length  (m)", color=DIM, fontsize=7, labelpad=3)
+    axI.set_zlabel("Elev  (m)",   color=DIM, fontsize=7, labelpad=2)
+    axI.tick_params(colors="#808080", labelsize=6)
+    axI.view_init(elev=25, azim=-50)
+    axI.set_title("D — ISOMETRIC VIEW", color=TC, fontsize=9, pad=5)
+
+    # legend
     leg_patches = [
-        mpatches.Patch(color=wall_col,  label=f"Concrete lining (B={B:.2f} m, m={m})"),
-        mpatches.Patch(color=water_col, label=f"Water (D={D:.2f} m)"),
-        mpatches.Patch(color="#e0c040", label=f"Centreline  L={L:.0f} m"),
+        mpatches.Patch(color=C_WALL, label=f"Concrete lining  m={m}:1"),
+        mpatches.Patch(color=C_WAT,  label=f"Water  D={D:.2f} m"),
+        mpatches.Patch(color=C_BED,  label="Canal bed"),
     ]
-    ax3d.legend(handles=leg_patches, fontsize=7, facecolor="#1a1a2a",
-                edgecolor="#3a3a4a", labelcolor=TC, loc="upper left")
+    axI.legend(handles=leg_patches, fontsize=7, facecolor="#1a1a2a",
+               edgecolor="#3a3a4a", labelcolor=TC, loc="upper left")
 
-    # ── Panel 2: annotated 2D cross-section ──────────────────────────
-    ax2 = fig.add_subplot(gs[0, 1])
-    ax2.set_facecolor("#0d1117")
-    ax2.set_aspect("equal")
-
-    # fill areas
-    ax2.fill_between(sec_w, z0, sec_z, color="#1a3a5a", alpha=0.85)
-    ax2.fill_between(water_w, z0, water_z, color="#1a6080", alpha=0.7)
-    ax2.axhline(z0 + D, color="#30b0e0", linewidth=1.2, linestyle="--", alpha=0.8)
-    ax2.plot(sec_w,   sec_z,   color="#5090d0", linewidth=2.0)
-    ax2.plot(water_w, water_z, color="#30b0e0", linewidth=1.5)
-
-    # dimension lines
-    dkw = dict(color="#e0c040", fontsize=7.5, ha="center")
-    ax2.annotate("", xy=(B/2, z0 - 0.3), xytext=(-B/2, z0 - 0.3),
-                 arrowprops=dict(arrowstyle="<->", color="#e0c040", lw=1.2))
-    ax2.text(0, z0 - 0.45, f"B = {B:.2f} m", **dkw)
-    ax2.annotate("", xy=(B/2 + m*D + 0.4, z0 + D), xytext=(B/2 + m*D + 0.4, z0),
-                 arrowprops=dict(arrowstyle="<->", color="#e0a030", lw=1.2))
-    ax2.text(B/2 + m*D + 0.7, z0 + D/2, f"D = {D:.2f} m",
-             color="#e0a030", fontsize=7.5, va="center")
-    ax2.annotate("", xy=(B/2 + m*total_h + 0.4, z0 + total_h),
-                 xytext=(B/2 + m*D + 0.4, z0 + D),
-                 arrowprops=dict(arrowstyle="<->", color="#c0c040", lw=1.0))
-    ax2.text(B/2 + m*total_h + 0.7, z0 + D + fb/2,
-             f"fb = {fb:.2f} m", color="#c0c040", fontsize=7, va="center")
-    # top-width
-    ax2.annotate("", xy=(B/2 + m*total_h, z0 + total_h + 0.2),
-                 xytext=(-(B/2 + m*total_h), z0 + total_h + 0.2),
-                 arrowprops=dict(arrowstyle="<->", color="#a0e0a0", lw=1.0))
-    ax2.text(0, z0 + total_h + 0.35, f"Tw = {Tw:.2f} m",
-             color="#a0e0a0", fontsize=7.5, ha="center")
-    # slope label
-    ax2.text(-(B/2 + m*D/2) - 0.05, z0 + D/2,
-             f"1:{m:.1f}", color=TC, fontsize=7, ha="right", va="center", style="italic")
-
-    # info box
-    info = (f"Q = {Q:.1f} m³/s    V = {V:.2f} m/s\n"
-            f"n = {n:.3f}    S = 1:{int(round(1/max(S,1e-9)))}\n"
-            f"IS 10430:2000  ✓")
-    ax2.text(0, z0 - 0.9, info, color=TC, fontsize=7.5, ha="center",
-             va="top", family="monospace",
-             bbox=dict(boxstyle="round,pad=0.3", fc="#1a1a2a", ec="#3a3a4a"))
-
-    ax2.set_title("B — Annotated Cross-Section", color=TC, fontsize=9)
-    ax2.tick_params(colors="#808080", labelsize=6)
-    for sp in ax2.spines.values():
-        sp.set_color("#303040")
-    ax2.set_xlim(-(B/2 + m*total_h) - 1.2, (B/2 + m*total_h) + 1.8)
-    ax2.set_ylim(z0 - 1.1, z0 + total_h + 0.7)
-    ax2.set_xlabel("Width offset (m)", color=DIM, fontsize=7)
-    ax2.set_ylabel("Elevation (m)",    color=DIM, fontsize=7)
-
-    # ── Panel 3: plan view ────────────────────────────────────────────
-    ax3 = fig.add_subplot(gs[1, 1])
-    ax3.set_facecolor("#0d1117")
-    ax3.set_aspect("equal")
-
-    lx, ly, rx, ry = _canal_footprint(cx, cy, Tw)
-    ax3.fill(np.concatenate([lx, rx[::-1]]),
-             np.concatenate([ly, ry[::-1]]),
-             color="#1a3a5a", alpha=0.7, label="Canal footprint")
-    ax3.plot(cx, cy, color="#e0c040", linewidth=1.4,
-             linestyle="--", label="Centreline")
-    ax3.plot(lx, ly, color="#5090d0", linewidth=0.9)
-    ax3.plot(rx, ry, color="#5090d0", linewidth=0.9)
-
-    ax3.set_title("C — Plan View (footprint on reach)", color=TC, fontsize=9)
-    ax3.tick_params(colors="#808080", labelsize=6)
-    ax3.legend(fontsize=7, facecolor="#1a1a2a", edgecolor="#3a3a4a", labelcolor=TC)
-    ax3.set_xlabel("X Lambert-93 (m)", color=DIM, fontsize=7)
-    ax3.set_ylabel("Y Lambert-93 (m)", color=DIM, fontsize=7)
-    for sp in ax3.spines.values():
-        sp.set_color("#303040")
-
-    fig.suptitle(
-        f"Canal CAD Model — IS 10430 · IS 5968   "
-        f"B={B:.2f} m · D={D:.2f} m · Q={Q:.0f} m³/s · n={n:.3f}",
-        color=TC, fontsize=11, y=0.97)
+    # ── title block ───────────────────────────────────────────────────
+    title = (f"Canal CAD Model — IS 10430 · IS 5968  ·  "
+             f"B = {B:.2f} m · D = {D:.2f} m · Tw = {Tw:.2f} m · "
+             f"Q = {Q:.0f} m³/s · V = {V:.2f} m/s · n = {n_m:.3f} · "
+             f"S = 1:{int(round(1/max(S,1e-9)))}")
+    fig.suptitle(title, color=TC, fontsize=10, y=0.97)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150, bbox_inches="tight",
