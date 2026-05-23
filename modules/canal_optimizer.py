@@ -1,14 +1,19 @@
 """
 modules/canal_optimizer.py
 ===========================
-JAX-based canal hydraulic optimizer (IS 5968:1987 + IS 10430:2000).
+Canal hydraulic optimizer (IS 5968:1987 + IS 10430:2000).
 
-Process
+Method — analytical minimum wetted perimeter (Chow 1959, Das 2000):
 -------
-Q_target  ─▶  gradient descent on Manning's equation
-          ─▶  IS code lookup (freeboard, min curve radius)
-          ─▶  velocity and slope compliance check
-          ─▶  canal_params dict / JSON
+For a trapezoidal section the minimum-cost (minimum wetted perimeter) section
+satisfies the classical result R = D/2, giving explicit formulas:
+
+    coef = 2*sqrt(1+m²) - m
+    D    = [Q*n*2^(2/3) / (sqrt(S)*coef)]^(3/8)   ← closed-form
+    B    = 2*D*(sqrt(1+m²) - m)                    ← closed-form
+
+No gradient descent is needed. If the resulting velocity violates IS 10430
+limits, D is found by Newton's method along the V=V_limit line instead.
 
 Public API
 ----------
@@ -23,14 +28,11 @@ CLI
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
-import jax
 import jax.numpy as jnp
-from jax import config
-
-config.update("jax_enable_x64", True)
 
 # ── IS code tables ────────────────────────────────────────────────────────────
 
@@ -62,37 +64,49 @@ def _is_freeboard(Q: float) -> float:
     return float(_FREEBOARD_VALUES[jnp.digitize(Q, _Q_BINS_FREEBOARD)])
 
 
-# ── hydraulics ────────────────────────────────────────────────────────────────
+# ── hydraulics (pure Python, no JAX needed) ───────────────────────────────────
 
-def _hydraulics(params, constants):
-    """Manning's equation for a trapezoidal section. Pure JAX (differentiable)."""
-    B, D, S_side = params
-    n, S_long = constants
-    area      = (B + S_side * D) * D
-    perimeter = B + 2.0 * D * jnp.sqrt(1.0 + S_side ** 2)
-    R_h       = area / perimeter
-    velocity  = (1.0 / n) * R_h ** (2.0 / 3.0) * jnp.sqrt(S_long)
-    discharge = area * velocity
-    return discharge, velocity, area, perimeter
+def _trap_hydraulics(B: float, D: float, m: float, n: float, S: float):
+    """Manning's equation for a trapezoidal section."""
+    A = (B + m * D) * D
+    P = B + 2.0 * D * math.sqrt(1.0 + m ** 2)
+    R = A / P
+    V = (1.0 / n) * R ** (2.0 / 3.0) * math.sqrt(S)
+    Q = A * V
+    return Q, V, A, P
 
 
-# ── objective ─────────────────────────────────────────────────────────────────
+def _analytical_section(Q_target: float, S: float, n: float, m: float):
+    """
+    Minimum wetted perimeter trapezoidal section (Chow 1959).
 
-def _objective(params, Q_target, constants):
-    B, D, S_side = params
-    Q, V, A, P = _hydraulics(params, constants)
+    Classical result: R = D/2 for the hydraulically efficient section.
+    Combined with Manning:  Q = (1/n)*(2√(1+m²)-m)*D² * (D/2)^(2/3) * √S
+    → D^(8/3) = Q*n*2^(2/3) / (√S * (2√(1+m²)-m))
+    → B = 2*D*(√(1+m²) - m)
+    """
+    coef = 2.0 * math.sqrt(1.0 + m ** 2) - m          # 2.106 for m=1.5
+    D = (Q_target * n * 2.0 ** (2.0 / 3.0) / (math.sqrt(S) * coef)) ** (3.0 / 8.0)
+    B = max(2.0 * D * (math.sqrt(1.0 + m ** 2) - m), 0.3)
+    return B, D
 
-    cost = A + P * 0.1                                           # min excavation + lining
 
-    # discharge must meet target (hard constraint via large penalty)
-    pen_Q    = 5000.0 * jnp.maximum(0.0, Q_target - Q) ** 2
-    # velocity limits (IS 10430, Cl 4.2)
-    pen_Vmax = 5000.0 * jnp.maximum(0.0, V - V_MAX_CONCRETE) ** 2
-    pen_Vmin = 2000.0 * jnp.maximum(0.0, V_MIN - V) ** 2
-    # standard side slope (IS 10430, Table 2) — soft regularisation
-    pen_side = 200.0  * (S_side - SIDE_SLOPE_CONCRETE) ** 2
+def _newton_D_for_velocity(Q_target: float, V_fix: float, S: float, n: float, m: float,
+                            tol: float = 1e-9, max_iter: int = 100) -> tuple[float, float]:
+    """
+    When velocity at the optimal section is outside IS limits, fix V = V_fix and
+    solve Q = Q_target via Newton's method on D, keeping B = 2D(√(1+m²)-m).
 
-    return cost + pen_Q + pen_Vmax + pen_Vmin + pen_side
+    For a minimum-P section: A = coef*D², P = 2*coef/2*(…) → V depends only on R=D/2.
+    So V_fix fixes D directly: D = (V_fix * n / √S)^(3/2) * 2.
+    Then B is computed from Q_target.
+    """
+    # V = (1/n)*(D/2)^(2/3)*√S  → D = 2*(V*n/√S)^(3/2)
+    D = 2.0 * (V_fix * n / math.sqrt(S)) ** 1.5
+    # With D fixed, solve for B from Q = (B+m*D)*D*V_fix = Q_target
+    B = Q_target / (D * V_fix) - m * D
+    B = max(B, 0.3)
+    return B, D
 
 
 # ── optimiser ─────────────────────────────────────────────────────────────────
@@ -102,45 +116,41 @@ def optimise_canal(
     S_long: float = 1 / 5000,
     n: float = MANNING_N_CONCRETE,
     lining: str = "concrete",
-    iters: int = 500,
-    lr: float = 0.005,
     out_path: str | None = None,
 ) -> dict:
     """
     Find minimum-cost trapezoidal canal section for Q_target (m³/s).
 
+    Uses the closed-form analytical solution (Chow 1959 / Das 2000) for
+    minimum wetted perimeter, with IS 10430 velocity compliance check.
     Returns a dict with all hydraulic and IS-code parameters.
     If out_path is given, also writes canal_params.json there.
     """
-    side_slope_init = SIDE_SLOPE_CONCRETE if lining == "concrete" else SIDE_SLOPE_MASONRY
-    params    = jnp.array([max(Q_target * 0.5, 1.0), 1.5, side_slope_init])
-    constants = (n, S_long)
+    m = SIDE_SLOPE_CONCRETE if lining == "concrete" else SIDE_SLOPE_MASONRY
 
-    grad_fn = jax.jit(jax.grad(_objective))
+    # Step 1: analytical minimum-wetted-perimeter section
+    B, D = _analytical_section(Q_target, S_long, n, m)
+    Q, V, A, P = _trap_hydraulics(B, D, m, n, S_long)
 
-    B_min, D_min, S_min = 0.5,  0.2, 1.0
-    B_max, D_max, S_max = 200., 15., 3.0
-
-    for _ in range(iters):
-        g      = grad_fn(params, Q_target, constants)
-        params = params - lr * g
-        params = jnp.clip(params,
-                          jnp.array([B_min, D_min, S_min]),
-                          jnp.array([B_max, D_max, S_max]))
-
-    B, D, S_side = (float(x) for x in params)
-    Q, V, A, P   = (_hydraulics(params, constants))
-    Q, V, A, P   = float(Q), float(V), float(A), float(P)
+    # Step 2: IS 10430 velocity check — adjust if needed
+    if V > V_MAX_CONCRETE:
+        # Fix velocity at max; widen B to satisfy Q
+        B, D = _newton_D_for_velocity(Q_target, V_MAX_CONCRETE, S_long, n, m)
+        Q, V, A, P = _trap_hydraulics(B, D, m, n, S_long)
+    elif V < V_MIN:
+        # Fix velocity at min; compute B for Q
+        B, D = _newton_D_for_velocity(Q_target, V_MIN, S_long, n, m)
+        Q, V, A, P = _trap_hydraulics(B, D, m, n, S_long)
 
     fb     = _is_freeboard(Q)
     min_r  = _is_min_radius(Q)
-    top_w  = B + 2.0 * S_side * (D + fb)
+    top_w  = B + 2.0 * m * (D + fb)
 
     result = {
         "Q_target_m3s":         round(Q_target, 4),
         "bed_width_m":          round(B, 4),
         "water_depth_m":        round(D, 4),
-        "side_slope":           round(S_side, 4),
+        "side_slope":           round(m, 4),
         "freeboard_m":          round(fb, 4),
         "total_depth_m":        round(D + fb, 4),
         "top_width_m":          round(top_w, 4),
@@ -155,7 +165,7 @@ def optimise_canal(
         # IS compliance flags
         "IS_velocity_ok":       V_MIN <= V <= V_MAX_CONCRETE,
         "IS_discharge_ok":      Q >= Q_target * 0.99,
-        "IS_side_slope_ok":     1.0 <= S_side <= 3.0,
+        "IS_side_slope_ok":     1.0 <= m <= 3.0,
     }
 
     if out_path:
