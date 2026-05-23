@@ -253,14 +253,51 @@ Right: B–D parameter space — yellow dashed contour = Q target, green = V_min
 
 ---
 
-### Stage 7 (cont.) — 3D CAD Model via FreeCAD
+### Stage 7b — Reach Geometry: Slope + Curvature → Informed Design
+
+The flow-depth raster is used to extract the **hydraulic thalweg centreline** and measure the terrain geometry that feeds directly back into the design stage.
+
+```
+flow_depth.tif  ─► wet mask  ─► fill holes + distance transform
+                                      │
+                              Row-wise centroid weighted by dist²
+                              (hydraulic thalweg = D8 flow path ridge)
+                                      │
+                              Gaussian smoothing (σ = 1 m)
+                                      │
+                  ┌───────────────────┴──────────────────────────┐
+                  │  Reach metrics                                │
+                  │    L    = 44.8 m  (arc length)               │
+                  │    B̄    = 21.5 m  (mean wet width)           │
+                  │    S    = 1:185   (best-fit terrain slope)    │
+                  │    R_min= 5.9 m   (tightest bend, measured)  │
+                  │    R̄    = 280 m   (mean curvature radius)    │
+                  └──────────┬───────────────────────────────────┘
+                             │
+                  ┌──────────▼───────────────────┐
+                  │  IS code feedback             │
+                  │  IS 5968 R_min = 1000 m       │
+                  │  → 5.9 m << 1000 m            │
+                  │  Terrain too curved for a     │
+                  │  straight concrete canal:     │
+                  │  add bends / realign           │
+                  │  IS 10430 S_design ≤ 1:5000   │
+                  │  → drop structures required   │
+                  └──────────────────────────────┘
+```
+
+<img src="assets/canal_3d_overlay.png" width="100%"/>
+
+*Five-panel geo-referenced overlay: **A** — 3D terrain surface (Lambert-93) with flood and designed canal cross-section at mid-reach; **B** — plan view with centreline colour-coded by radius of curvature (green = gentle, red = tight); **C** — curvature radius profile vs IS 5968 minimum (red dashed); **D** — longitudinal profile showing terrain, flood, and canal invert; **E** — mid-reach cross-section comparing existing flood width with the IS-code designed trapezoidal section.*
+
+### Stage 7c — 3D CAD Model via FreeCAD
 
 The IS-compliant section is swept along a 1 km alignment (IS 5968 curve) and exported as STEP + OBJ. The section is then placed back into the ortho photo coordinate system for visual validation.
 
 ```bash
 # Generate 3D model + 2D section drawings
 freecadcmd modules/canal_cad.py \
-    --params canal_design/canal_params.json \
+    --params output/canal_params.json \
     --output output/canal
 
 # Optional: compound (multi-stage berm) section
